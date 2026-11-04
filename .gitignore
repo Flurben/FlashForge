@@ -1,0 +1,15 @@
+.gradle/
+build/
+out/
+bin/
+run/
+run-*/
+logs/
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+tools/instance/
+*.ffreplay/

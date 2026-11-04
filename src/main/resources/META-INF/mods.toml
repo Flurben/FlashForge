@@ -1,0 +1,20 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All rights reserved (private project)"
+[[mods]]
+modId="flashforge"
+version="${version}"
+displayName="FlashForge"
+description='''Record gameplay, replay it with a cinematic editor, and export video. Forge 1.20.1.'''
+[[dependencies.flashforge]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.flashforge]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="BOTH"

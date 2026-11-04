@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.flurben.flashforge.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "flashforge.refmap.json",
+  "plugin": "com.flurben.flashforge.mixin.FlashForgeMixinPlugin",
+  "client": [
+    "MixinClientLevel",
+    "MixinConnection",
+    "MixinLivingEntity",
+    "MixinLocalPlayer",
+    "MixinMinecraft",
+    "accessor.BlockableEventLoopInvoker",
+    "accessor.BossHealthOverlayAccessor",
+    "accessor.MinecraftAccessor",
+    "accessor.PlayerTabOverlayAccessor",
+    "accessor.TimerAccessor"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}
