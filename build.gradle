@@ -6,7 +6,7 @@ plugins {
 }
 
 version = mod_version
-group = 'com.flurben.flashforge'
+group = 'com.flurben.flashbackreforged'
 base { archivesName = mod_id }
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
@@ -20,18 +20,18 @@ minecraft {
             property 'forge.logging.console.level', 'info'
             property 'mixin.env.remapRefMap', 'true'
             property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
-            args '--mixin.config', 'flashforge.mixins.json'
-            mods { flashforge { source sourceSets.main } }
+            args '--mixin.config', 'flashback_reforged.mixins.json'
+            mods { flashback_reforged { source sourceSets.main } }
         }
         client {
-            property 'flashforge.selftest', project.findProperty('selftest') ?: ''
+            property 'flashback_reforged.selftest', project.findProperty('selftest') ?: ''
         }
     }
 }
 
 mixin {
-    add sourceSets.main, 'flashforge.refmap.json'
-    config 'flashforge.mixins.json'
+    add sourceSets.main, 'flashback_reforged.refmap.json'
+    config 'flashback_reforged.mixins.json'
 }
 
 repositories {
@@ -80,7 +80,7 @@ shadowJar {
             'Specification-Title': mod_id,
             'Implementation-Title': project.name,
             'Implementation-Version': project.version,
-            'MixinConfigs': 'flashforge.mixins.json'
+            'MixinConfigs': 'flashback_reforged.mixins.json'
         )
     }
 }

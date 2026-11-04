@@ -51,8 +51,8 @@ async function main() {
 
   const version = fs.readFileSync(path.join(ROOT, "gradle.properties"), "utf8").match(/mod_version\s*=\s*(\S+)/)[1];
   const mods = path.join(game, "mods");
-  for (const f of fs.readdirSync(mods)) if (f.startsWith("flashforge-")) fs.rmSync(path.join(mods, f));
-  fs.copyFileSync(path.join(ROOT, "build/libs", `flashforge-${version}.jar`), path.join(mods, `flashforge-${version}.jar`));
+  for (const f of fs.readdirSync(mods)) if (f.startsWith("flashback_reforged-") || f.startsWith("flashforge-")) fs.rmSync(path.join(mods, f));
+  fs.copyFileSync(path.join(ROOT, "build/libs", `flashback_reforged-${version}.jar`), path.join(mods, `flashback_reforged-${version}.jar`));
 
   const dhFile = path.join(mods, path.basename(DH_URL));
   if (args.includes("--no-dh")) {
@@ -62,28 +62,28 @@ async function main() {
   }
 
   // The mod reads and removes this file. Instance settings can't carry it: an open Prism keeps them cached.
-  const request = [`flashforge.selftest=${option("--scenario", "full")}`, "flashforge.selftest.world=flashforge_test"];
-  if (option("--preset")) request.push(`flashforge.selftest.preset=${option("--preset")}`);
-  if (option("--ticks")) request.push(`flashforge.selftest.ticks=${option("--ticks")}`);
-  const requestFile = path.join(game, "flashforge-selftest.properties");
+  const request = [`flashback_reforged.selftest=${option("--scenario", "full")}`, "flashback_reforged.selftest.world=flashback_reforged_test"];
+  if (option("--preset")) request.push(`flashback_reforged.selftest.preset=${option("--preset")}`);
+  if (option("--ticks")) request.push(`flashback_reforged.selftest.ticks=${option("--ticks")}`);
+  const requestFile = path.join(game, "flashback_reforged-selftest.properties");
   fs.writeFileSync(requestFile, request.join("\n") + "\n");
 
   // A fresh world each run: a run that crashed can leave a half generated one behind.
-  fs.rmSync(path.join(game, "saves/flashforge_test"), { recursive: true, force: true });
+  fs.rmSync(path.join(game, "saves/flashback_reforged_test"), { recursive: true, force: true });
 
   const irisPath = path.join(game, "config/oculus.properties");
   const irisBefore = fs.existsSync(irisPath) ? fs.readFileSync(irisPath, "utf8") : null;
   const shader = option("--shader");
   fs.writeFileSync(irisPath, setCfg(irisBefore || "#\n", { shaderPack: shader || "", enableShaders: shader ? "true" : "false" }));
 
-  const result = path.join(game, "flashforge-selftest.json");
+  const result = path.join(game, "flashback_reforged-selftest.json");
   fs.rmSync(result, { force: true });
   const crashes = path.join(game, "crash-reports");
   const crashesBefore = new Set(fs.existsSync(crashes) ? fs.readdirSync(crashes) : []);
 
   const wasRunning = prismRunning();
   const started = Date.now();
-  spawn(PRISM, ["--launch", instanceName, "--offline", "FlashForgeTest"], { detached: true, stdio: "ignore" }).unref();
+  spawn(PRISM, ["--launch", instanceName, "--offline", "FBReforgedTest"], { detached: true, stdio: "ignore" }).unref();
 
   // The instance's folder name appears in the game's command line, which is how its process is recognised.
   const needle = instanceName;

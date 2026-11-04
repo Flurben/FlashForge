@@ -24,10 +24,10 @@ Both are provided under the MIT License:
 ## Not bundled
 
 FFmpeg is a separate program found on the user's system. Distant Horizons, Oculus, Embeddium and Simple Voice Chat are
-optional mods the user installs; FlashForge only calls into them when they are present.
+optional mods the user installs; Flashback Reforged only calls into them when they are present.
 
 ## Relationship to Flashback
 
-FlashForge is an independent Forge implementation inspired by Flashback by Moulberry. Flashback's source is
+Flashback Reforged is an independent Forge implementation inspired by Flashback by Moulberry. Flashback's source is
 "all rights reserved", so none of it is included here; it was read to understand behavior and which integration points
-exist. The replay file format is FlashForge's own and is not compatible with Flashback replays.
+exist. The replay file format is Flashback Reforged's own and is not compatible with Flashback replays.

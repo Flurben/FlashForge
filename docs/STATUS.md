@@ -1,4 +1,4 @@
-# FlashForge status
+# Flashback Reforged status
 
 Tested on Minecraft 1.20.1, Forge 47.4.13, Windows 11, NVIDIA RTX 4070 Ti SUPER.
 
@@ -18,7 +18,7 @@ Entity types in the replay's final seconds matched the live game exactly in TFG,
 replay's own viewer entity.
 
 The remaining packet failures are one GTCEu packet (`SPacketNotifyCapeChange`) that throws a null pointer in GTCEu's own
-handler when a player has no cape. FlashForge skips it and logs it. Whether it also throws in normal play wasn't checked.
+handler when a player has no cape. Flashback Reforged skips it and logs it. Whether it also throws in normal play wasn't checked.
 
 ## Features
 
@@ -55,14 +55,14 @@ Repeat exports of the same range with the same settings are not byte-identical. 
 
 ## Known gaps compared to Flashback
 
-- **Upload to medal.tv and copy a link.** Flashback sends clips to a medal.tv address made for Flashback and identifies itself as Flashback. FlashForge doesn't pretend to be another mod to use it.
+- **Upload to medal.tv and copy a link.** Flashback sends clips to a medal.tv address made for Flashback and identifies itself as Flashback. Flashback Reforged doesn't pretend to be another mod to use it.
 - **Bobby chunk support.** Modrinth lists Bobby for 1.20.1 on Fabric only, so there is no Forge version to integrate with or test.
 - Modded login-phase payloads are not replayed.
 
 ## Differences from what was asked
 
 - **Original code, not copied from Flashback.** Flashback's license says "All rights reserved" and "do not redistribute".
-  A private mod doesn't change that, and only its author could give permission, so its source was used as a reference for
+  Keeping or publishing this project doesn't change that, and only its author could give permission, so its source was used as a reference for
   behavior only.
 - **FFmpeg is not bundled.** The mod uses FFmpeg already on the system, or the path set in the options.
 - **Flashback's GitHub Issues are disabled**, so only ReplayMod's issues could be consulted.
@@ -70,12 +70,12 @@ Repeat exports of the same range with the same settings are not byte-identical. 
 
 ## Compatibility fixes found through TFG
 
-- Sound Physics Remastered redirects the same OpenAL call FlashForge used; hook changed so both apply. This was a crash at startup.
-- DH 3.3.3 + Chunky crash when TFC searches for a spawn point in a new world. FlashForge holds DH's Chunky hook until Chunky has started.
+- Sound Physics Remastered redirects the same OpenAL call Flashback Reforged used; hook changed so both apply. This was a crash at startup.
+- DH 3.3.3 + Chunky crash when TFC searches for a spawn point in a new world. Flashback Reforged holds DH's Chunky hook until Chunky has started.
 - Mod payloads that refer to a player failed when applied before the world in a snapshot; failures are now retried at the end of the snapshot.
 - Packets queued at the moment recording began were lost, which is more likely with large registries. These are now applied before the first snapshot.
 - Shader exports came out black because the shader clock jumped backward when an export began. The clock is now continuous.
-- TFC decides rain and snow itself, which overrode FlashForge's weather settings. The overrides now run first, and only while one is set.
+- TFC decides rain and snow itself, which overrode Flashback Reforged's weather settings. The overrides now run first, and only while one is set.
 - The first frames of an export could zoom slightly, as a FOV value frozen during pause caught up. The viewer's FOV modifier is now fixed.
 
 ## Not tested

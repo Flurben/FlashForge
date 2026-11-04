@@ -1,18 +1,18 @@
 modLoader="javafml"
 loaderVersion="[47,)"
-license="All rights reserved (private project)"
+license="All rights reserved"
 [[mods]]
-modId="flashforge"
+modId="flashback_reforged"
 version="${version}"
-displayName="FlashForge"
+displayName="Flashback Reforged"
 description='''Record gameplay, replay it with a cinematic editor, and export video. Forge 1.20.1.'''
-[[dependencies.flashforge]]
+[[dependencies.flashback_reforged]]
 modId="forge"
 mandatory=true
 versionRange="[47,)"
 ordering="NONE"
 side="BOTH"
-[[dependencies.flashforge]]
+[[dependencies.flashback_reforged]]
 modId="minecraft"
 mandatory=true
 versionRange="[1.20.1,1.21)"
