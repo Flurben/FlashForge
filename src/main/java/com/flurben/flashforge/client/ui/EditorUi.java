@@ -96,6 +96,7 @@ public final class EditorUi {
     /** Called after the game has drawn itself to the default framebuffer and before the buffers swap. */
     public void render() {
         if (this.failed || !ReplayPlayer.isActive()) {
+            finishWindowShot();
             return;
         }
         Minecraft mc = Minecraft.getInstance();

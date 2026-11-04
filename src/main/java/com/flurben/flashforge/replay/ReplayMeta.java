@@ -25,6 +25,8 @@ public final class ReplayMeta {
         public String file;
         public int startTick;
         public int ticks;
+        /** Starts a different recording: the world is rebuilt here rather than carried over. */
+        public boolean discontinuity;
 
         public Segment() {}
 

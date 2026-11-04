@@ -52,6 +52,7 @@ public final class SelfTest {
     private static Step step = Step.WAIT_TITLE;
     private static int wait;
     private static Path replayDir;
+    private static Path combinedDir;
     private static final Map<String, Object> RESULT = new LinkedHashMap<>();
     private static final List<String> FAILURES = new ArrayList<>();
     private static int entitiesAtEnd;
@@ -59,7 +60,7 @@ public final class SelfTest {
     private SelfTest() {}
 
     private enum Step {
-        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, FINISH, DONE
+        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
     }
 
     public static boolean enabled() {
@@ -257,6 +258,62 @@ public final class SelfTest {
                 check(Files.exists(file) && Files.size(file) > 10_000, "exported screenshot missing or empty: " + ExportManager.lastError());
                 RESULT.put("packetsApplied", ReplayPlayer.active().packetsApplied());
                 RESULT.put("packetFailures", ReplayPlayer.active().packetFailures());
+                ReplayPlayer replay = ReplayPlayer.active();
+                replay.spectate(mc.level.getEntity(replay.recordedPlayerId()));
+                replay.editor().visuals().showHud = true;
+                replay.editor().visuals().showHotbar = true;
+                replay.editor().visuals().showHand = true;
+                go(Step.SPECTATE, 20);
+            }
+            case SPECTATE -> {
+                EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/spectate_hud.png"));
+                go(Step.COMBINE, 10);
+            }
+            case COMBINE -> {
+                ReplayPlayer.active().editor().visuals().showHud = false;
+                ReplayPlayer.active().editor().visuals().showHand = false;
+                combinedDir = com.flurben.flashforge.replay.ReplayCombiner.combine(replayDir, replayDir);
+                ReplayPlayer.active().exit();
+                mc.setScreen(new com.flurben.flashforge.client.ui.ReplayBrowserScreen(new TitleScreen()));
+                go(Step.BROWSER, 20);
+            }
+            case BROWSER -> {
+                EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/browser.png"));
+                go(Step.OPEN_COMBINED, 10);
+            }
+            case OPEN_COMBINED -> {
+                mc.setScreen(new TitleScreen());
+                mc.tell(() -> {
+                    try {
+                        ReplayPlayer opened = ReplayPlayer.open(combinedDir);
+                        // Just short of the join between the two recordings, then play across it.
+                        opened.seek(opened.totalTicks() / 2 - 3);
+                        opened.setPaused(false);
+                    } catch (Throwable t) {
+                        FlashForge.LOGGER.error("Could not open combined replay", t);
+                        FAILURES.add("combined open failed: " + t);
+                        finish(mc);
+                    }
+                });
+                go(Step.COMBINED_CROSS, 60);
+            }
+            case COMBINED_CROSS -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                RESULT.put("combinedTotal", replay.totalTicks());
+                RESULT.put("combinedTick", replay.tick());
+                check(replay.totalTicks() == 2 * RECORD_TICKS, "combined length is " + replay.totalTicks());
+                check(replay.tick() > replay.totalTicks() / 2 + 20, "did not play across the join: tick " + replay.tick());
+                check(mc.level.getEntity(replay.recordedPlayerId()) != null, "recorded player lost across the join");
+                RESULT.put("combinedEntities", count(mc));
+                RESULT.put("combinedChunks", mc.level.getChunkSource().getLoadedChunksCount());
+                check(mc.level.getChunkSource().getLoadedChunksCount() > 0, "no chunks after the join");
+                RESULT.put("combinedFailures", replay.packetFailures());
+                replay.setPaused(true);
+                go(Step.COMBINED_DONE, 5);
+            }
+            case COMBINED_DONE -> {
+                ReplayPlayer.active().exit();
+                com.flurben.flashforge.replay.ReplayStorage.delete(combinedDir);
                 go(Step.FINISH, 20);
             }
             case FINISH -> finish(mc);

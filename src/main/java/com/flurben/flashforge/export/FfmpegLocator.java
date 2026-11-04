@@ -17,6 +17,9 @@ public final class FfmpegLocator {
     public static Path find() {
         String exe = System.getProperty("os.name", "").toLowerCase().contains("win") ? "ffmpeg.exe" : "ffmpeg";
 
+        String fromOptions = com.flurben.flashforge.client.FlashForgeConfig.FFMPEG_PATH.get();
+        if (!fromOptions.isBlank() && Files.isRegularFile(Path.of(fromOptions))) return Path.of(fromOptions);
+
         String configured = System.getProperty("flashforge.ffmpeg");
         if (configured != null && Files.isRegularFile(Path.of(configured))) return Path.of(configured);
 

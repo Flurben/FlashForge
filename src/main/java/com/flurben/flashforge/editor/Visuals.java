@@ -49,6 +49,7 @@ public final class Visuals {
     // Compositing guides, editor only
     public boolean ruleOfThirds = false;
     public boolean centerGuide = false;
+    public boolean showCameraPath = true;
     /** 0 = off, otherwise width / height. */
     public float aspectGuide = 0f;
 

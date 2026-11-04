@@ -59,12 +59,17 @@ public final class ClientEvents {
 
         @SubscribeEvent
         public static void renderTick(TickEvent.RenderTickEvent event) {
-            if (event.phase != TickEvent.Phase.START) return;
             ReplayPlayer replay = ReplayPlayer.active();
+            if (event.phase != TickEvent.Phase.START) {
+                com.flurben.flashforge.client.SpectatorHud.endFrame();
+                return;
+            }
             if (replay == null) return;
+            com.flurben.flashforge.client.SpectatorHud.beginFrame(replay);
             // The HUD setting travels with the replay and is put back when it closes.
             Minecraft mc = Minecraft.getInstance();
-            mc.options.hideGui = !replay.editor().visuals().showHud;
+            // The hand is also hidden by this flag, so it stays off only when neither is wanted.
+            mc.options.hideGui = !replay.editor().visuals().showHud && !replay.editor().visuals().showHand;
             replay.camera().setInputEnabled(!com.flurben.flashforge.export.ExportManager.isExporting()
                     && (com.flurben.flashforge.client.ui.EditorUi.get().flying() || com.flurben.flashforge.client.ui.EditorUi.get().hidden()));
             // An export has already set this frame's scene state from its own clock.
@@ -107,18 +112,20 @@ public final class ClientEvents {
         }
         while (ADD_MARKER.consumeClick()) {
             Recorder recorder = Recorder.active();
-            if (recorder != null) {
-                var marker = new com.flurben.flashforge.replay.ReplayMeta.Marker();
-                if (mc.player != null) {
-                    marker.x = mc.player.getX();
-                    marker.y = mc.player.getY();
-                    marker.z = mc.player.getZ();
-                    marker.dimension = mc.player.level().dimension().location().toString();
-                }
-                recorder.addMarker(marker);
-                toast(mc, "Marker added", "At tick " + recorder.tick());
-            }
+            if (recorder != null) addMarker(mc, recorder);
         }
+    }
+
+    public static void addMarker(Minecraft mc, Recorder recorder) {
+        var marker = new com.flurben.flashforge.replay.ReplayMeta.Marker();
+        if (mc.player != null) {
+            marker.x = mc.player.getX();
+            marker.y = mc.player.getY();
+            marker.z = mc.player.getZ();
+            marker.dimension = mc.player.level().dimension().location().toString();
+        }
+        recorder.addMarker(marker);
+        toast(mc, "Marker added", "At tick " + recorder.tick());
     }
 
     public static void toggleRecording(Minecraft mc) {

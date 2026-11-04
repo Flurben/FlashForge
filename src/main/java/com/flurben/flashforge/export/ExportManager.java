@@ -89,6 +89,12 @@ public final class ExportManager {
         }
     }
 
+    /** The time shader packs should see: real time, except during an export, where it follows video frames. */
+    public static long shaderClock(long realNanos) {
+        Job current = job;
+        return current == null ? realNanos : current.clockFrames * 1_000_000_000L / current.settings.fps;
+    }
+
     /** True while an export is rendering with no sky behind the world. */
     public static boolean transparentBackground() {
         return job != null && job.settings.transparent;
@@ -123,6 +129,8 @@ public final class ExportManager {
         int warmup;
         int chunkWait;
         int frame;
+        /** Every frame drawn, including ones that aren't saved. */
+        long clockFrames;
         boolean capturedThisFrame;
         boolean sized;
         boolean cancel;
@@ -177,6 +185,7 @@ public final class ExportManager {
                 return -1;
             }
             this.capturedThisFrame = false;
+            this.clockFrames++;
 
             if (!this.sized) {
                 this.sized = true;

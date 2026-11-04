@@ -92,7 +92,7 @@ public final class Recorder {
         r.meta.minecraftVersion = SharedConstants.getCurrentVersion().getName();
         r.meta.protocol = SharedConstants.getCurrentVersion().getProtocolVersion();
         ModList.get().getMods().forEach(m -> r.meta.mods.put(m.getModId(), m.getVersion().toString()));
-        r.meta.distantHorizons.putAll(DistantHorizonsCompat.dimensionPaths());
+        DistantHorizonsCompat.collectPaths(r.meta.distantHorizons);
         r.saveRegistries();
         com.flurben.flashforge.replay.ServerConfigStore.save(dir);
         r.beginSegment();

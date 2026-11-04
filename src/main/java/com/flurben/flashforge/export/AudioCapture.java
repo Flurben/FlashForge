@@ -24,6 +24,7 @@ public final class AudioCapture {
 
     private static long loopbackDevice;
     private static boolean armed;
+    private static AudioCapture current;
 
     private final Path file;
     private final RandomAccessFile out;
@@ -33,6 +34,19 @@ public final class AudioCapture {
     private final byte[] bytes;
     private double owedSamples;
     private long totalBytes;
+    /** Voice waiting to be mixed in, as stereo-independent mono samples with their gain. */
+    private final java.util.ArrayDeque<VoiceClip> voice = new java.util.ArrayDeque<>();
+
+    private static final class VoiceClip {
+        final short[] samples;
+        final float gain;
+        int position;
+
+        VoiceClip(short[] samples, float gain) {
+            this.samples = samples;
+            this.gain = gain;
+        }
+    }
 
     private AudioCapture(Path file, int fps) throws IOException {
         this.file = file;
@@ -58,11 +72,36 @@ public final class AudioCapture {
                 Minecraft.getInstance().getSoundManager().reload();
                 return null;
             }
+            current = capture;
             return capture;
         } catch (Throwable t) {
             armed = false;
             FlashForge.LOGGER.warn("Could not start audio capture", t);
             return null;
+        }
+    }
+
+    /** Adds voice to the export's audio from the current moment on. Voice chat plays outside the sound engine. */
+    public static void addVoice(short[] samples, float gain) {
+        if (current != null && gain > 0) current.voice.addLast(new VoiceClip(samples, gain));
+    }
+
+    private void mixVoice(int samples) {
+        for (var it = this.voice.iterator(); it.hasNext(); ) {
+            VoiceClip clip = it.next();
+            int count = Math.min(samples, clip.samples.length - clip.position);
+            for (int i = 0; i < count; i++) {
+                int sample = (int) (clip.samples[clip.position + i] * clip.gain);
+                for (int channel = 0; channel < CHANNELS; channel++) {
+                    int at = (i * CHANNELS + channel) * BYTES_PER_SAMPLE;
+                    int low = this.bytes[at] & 0xFF, high = this.bytes[at + 1];
+                    int mixed = Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, ((high << 8) | low) + sample));
+                    this.bytes[at] = (byte) mixed;
+                    this.bytes[at + 1] = (byte) (mixed >> 8);
+                }
+            }
+            clip.position += count;
+            if (clip.position >= clip.samples.length) it.remove();
         }
     }
 
@@ -100,6 +139,7 @@ public final class AudioCapture {
         int length = samples * CHANNELS * BYTES_PER_SAMPLE;
         this.buffer.position(0).limit(length);
         this.buffer.get(this.bytes, 0, length);
+        mixVoice(samples);
         try {
             this.out.write(this.bytes, 0, length);
             this.totalBytes += length;
@@ -114,6 +154,7 @@ public final class AudioCapture {
 
     void stop() {
         armed = false;
+        current = null;
         loopbackDevice = 0;
         // Back to the real output device.
         Minecraft.getInstance().getSoundManager().reload();

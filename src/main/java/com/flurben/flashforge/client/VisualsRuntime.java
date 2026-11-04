@@ -99,6 +99,13 @@ public final class VisualsRuntime {
     public static final class Events {
         private Events() {}
 
+        /** The GUI can be on just for the hand, without any of the HUD. */
+        @SubscribeEvent
+        public static void gui(net.minecraftforge.client.event.RenderGuiEvent.Pre event) {
+            Visuals v = visuals();
+            if (v != null && !v.showHud) event.setCanceled(true);
+        }
+
         @SubscribeEvent
         public static void overlay(RenderGuiOverlayEvent.Pre event) {
             Visuals v = visuals();

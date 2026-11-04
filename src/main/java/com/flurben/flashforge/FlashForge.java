@@ -17,6 +17,12 @@ public final class FlashForge {
     public FlashForge() {
         ModLoadingContext.get().registerExtensionPoint(IExtensionPoint.DisplayTest.class,
                 () -> new IExtensionPoint.DisplayTest(() -> IExtensionPoint.DisplayTest.IGNORESERVERONLY, (version, fromServer) -> true));
+        // Everything below touches client-only classes; a server with this jar installed just ignores it.
+        if (net.minecraftforge.fml.loading.FMLEnvironment.dist != Dist.CLIENT) return;
+        ModLoadingContext.get().registerConfig(net.minecraftforge.fml.config.ModConfig.Type.CLIENT, com.flurben.flashforge.client.FlashForgeConfig.SPEC);
+        ModLoadingContext.get().registerExtensionPoint(net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory.class,
+                () -> new net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory((mc, parent) -> new com.flurben.flashforge.client.ui.SettingsScreen(parent)));
+        com.flurben.flashforge.compat.DistantHorizonsCompat.init();
         LOGGER.info("FlashForge loading");
     }
 }

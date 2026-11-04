@@ -315,9 +315,16 @@ public final class ReplayPlayer {
                     return false;
                 }
                 try {
+                    boolean fresh = this.meta.segments.get(this.segmentIndex + 1).discontinuity;
                     loadSegment(this.segmentIndex + 1);
-                    // State carries over from the previous segment, so its snapshot is not needed.
-                    skipSnapshot();
+                    if (fresh) {
+                        resetWorld();
+                        applySnapshot();
+                        settleEntities();
+                    } else {
+                        // State carries over from the previous segment, so its snapshot is not needed.
+                        skipSnapshot();
+                    }
                 } catch (IOException e) {
                     FlashForge.LOGGER.error("Could not read the next replay segment", e);
                     return false;
@@ -609,6 +616,8 @@ public final class ReplayPlayer {
     public void close() {
         if (active != this) return;
         active = null;
+        this.mc.options.hideGui = false;
+        com.flurben.flashforge.client.SpectatorHud.endFrame();
         this.editor.save();
         setSpeedNoCheck();
         this.connection.shutdown();

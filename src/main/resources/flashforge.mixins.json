@@ -27,7 +27,12 @@
     "visual.MixinEntityRenderDispatcher",
     "visual.MixinLevelRenderer",
     "visual.MixinLightTexture",
-    "visual.MixinParticleEngine"
+    "visual.MixinParticleEngine",
+    "compat.iris.MixinIrisTimer",
+    "compat.voicechat.MixinClientPlayerStateManager",
+    "compat.voicechat.MixinClientVoicechat",
+    "visual.MixinAbstractClientPlayer",
+    "visual.MixinMultiPlayerGameMode"
   ],
   "injectors": {
     "defaultRequire": 1

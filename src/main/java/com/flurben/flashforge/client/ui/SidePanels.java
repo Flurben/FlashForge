@@ -30,6 +30,7 @@ public final class SidePanels {
     private final ImString filter = new ImString(64);
     private final ImString newSceneName = new ImString(64);
     private final ImString markerText = new ImString(128);
+    private final ImString skinName = new ImString(32);
 
     float preferredWidth() {
         return 340f;
@@ -137,6 +138,7 @@ public final class SidePanels {
         if (ImGui.collapsingHeader("Guides")) {
             v.ruleOfThirds = toggle("Rule of Thirds", v.ruleOfThirds);
             v.centerGuide = toggle("Center Mark", v.centerGuide);
+            v.showCameraPath = toggle("Camera Path", v.showCameraPath);
             String[] names = {"Off", "16:9", "9:16", "1:1", "4:3", "2.39:1"};
             float[] values = {0f, 16f / 9f, 9f / 16f, 1f, 4f / 3f, 2.39f};
             int current = 0;
@@ -177,6 +179,13 @@ public final class SidePanels {
                 replay.camera().teleport(player.getX(), player.getY() + 1.6, player.getZ() - 3, 0, 15);
             }
             ImGui.endDisabled();
+            String skin = v.skinOverrides.get(id);
+            this.skinName.set(skin == null ? "" : skin);
+            ImGui.setNextItemWidth(ImGui.getContentRegionAvailX() - 60);
+            if (ImGui.inputTextWithHint("Skin", "Show another player's skin", this.skinName, imgui.flag.ImGuiInputTextFlags.EnterReturnsTrue)) {
+                if (this.skinName.get().isBlank()) v.skinOverrides.remove(id);
+                else v.skinOverrides.put(id, this.skinName.get().trim());
+            }
             ImGui.popID();
         }
     }
