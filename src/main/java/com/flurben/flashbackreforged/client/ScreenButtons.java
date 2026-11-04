@@ -97,6 +97,9 @@ public final class ScreenButtons {
         if (recorder != null) recorder.beforeGui();
     }
 
+    private static int indicatorSeconds = -1;
+    private static String indicatorText = "";
+
     /** The recording state is never shown in the recording itself: this is drawn on the live HUD only. */
     @SubscribeEvent
     public static void indicator(RenderGuiEvent.Post event) {
@@ -106,7 +109,11 @@ public final class ScreenButtons {
         GuiGraphics g = event.getGuiGraphics();
         g.fill(5, 5, 11, 11, recorder.paused() ? 0xFFFFAA00 : 0xFFFF3030);
         int seconds = recorder.tick() / 20;
-        g.drawString(mc.font, String.format("%d:%02d", seconds / 60, seconds % 60), 14, 4, 0xFFFFFF);
+        if (seconds != indicatorSeconds) {
+            indicatorSeconds = seconds;
+            indicatorText = String.format("%d:%02d", seconds / 60, seconds % 60);
+        }
+        g.drawString(mc.font, indicatorText, 14, 4, 0xFFFFFF);
     }
 
     /** Marks what the editor treats specially: yellow is selected, green is the audio source, red is left out of exports. */
@@ -167,7 +174,9 @@ public final class ScreenButtons {
         VertexConsumer lines = buffers.getBuffer(RenderType.lines());
         double first = track.keyframes.firstKey(), last = track.keyframes.lastKey();
         double[] from = track.evaluate(first);
-        for (double t = first + 0.5; t <= last; t += 0.5) {
+        // Half a tick is plenty for a short path. A long one doesn't look any different for having tens of thousands of lines.
+        double step = Math.max(0.5, (last - first) / 2048);
+        for (double t = first + step; t <= last; t += step) {
             double[] to = track.evaluate(t);
             float nx = (float) (to[0] - from[0]), ny = (float) (to[1] - from[1]), nz = (float) (to[2] - from[2]);
             float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);

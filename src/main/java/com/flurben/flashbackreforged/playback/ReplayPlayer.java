@@ -35,6 +35,9 @@ import net.minecraft.world.level.GameType;
 import net.minecraftforge.registries.ForgeRegistry;
 import net.minecraftforge.registries.GameData;
 
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,6 +72,17 @@ public final class ReplayPlayer {
     private final Map<String, Integer> failuresByPacket = new HashMap<>();
     private final ViewerCamera camera = new ViewerCamera();
 
+    private final ReplayFiles files;
+    private BlobReader blobs;
+    private int blobFileId;
+    /** The entry being applied, wherever its bytes turned out to be. */
+    private byte[] payloadData;
+    private int payloadOffset;
+    private int payloadLength;
+    /** Which stored content each loaded chunk came from, for as long as nothing has changed it. */
+    private final Long2LongOpenHashMap chunkContent = new Long2LongOpenHashMap();
+    /** The chunks in the snapshot about to be applied. */
+    private final LongOpenHashSet snapshotChunks = new LongOpenHashSet();
     private int segmentIndex = -1;
     private SegmentReader segment;
     /** Position on the timeline. */
@@ -99,6 +113,7 @@ public final class ReplayPlayer {
                 this.mc.getTelemetryManager().createWorldSessionManager(false, null, null));
         this.connection.setListener(this.listener);
         this.editor = EditorState.load(dir, this);
+        this.files = new ReplayFiles(dir, meta);
     }
 
     public static ReplayPlayer active() {
@@ -112,22 +127,33 @@ public final class ReplayPlayer {
     /** Client thread only. Any open world must be closed first. */
     public static ReplayPlayer open(Path dir) throws IOException {
         if (active != null) throw new IllegalStateException("A replay is already open");
+        // A recording that just stopped may still be reaching the disk.
+        com.flurben.flashbackreforged.record.Recorder.awaitWrites();
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) throw new IllegalStateException("Leave the current world before opening a replay");
 
+        long openStart = com.flurben.flashbackreforged.perf.Perf.start();
         ReplayMeta meta = ReplayMeta.read(dir);
         if (meta.segments.isEmpty()) throw new IOException("Replay has no recorded data");
+        if (meta.format > ReplayMeta.FORMAT) throw new IOException("This replay was made by a newer version of the mod");
         if (!meta.finished) recover(dir, meta);
 
+        long registryStart = com.flurben.flashbackreforged.perf.Perf.start();
         Map<ResourceLocation, ForgeRegistry.Snapshot> registries = readRegistries(dir);
+        com.flurben.flashbackreforged.perf.Perf.end("open.readRegistries", registryStart);
+        long injectStart = com.flurben.flashbackreforged.perf.Perf.start();
         var missing = GameData.injectSnapshot(registries, false, false);
+        com.flurben.flashbackreforged.perf.Perf.end("open.injectRegistries", injectStart);
         if (!missing.isEmpty()) {
             FlashbackReforged.LOGGER.warn("Replay references {} registry entries missing from this game (pack changed since recording?): {}", missing.size(), missing);
         }
 
+        long configStart = com.flurben.flashbackreforged.perf.Perf.start();
         com.flurben.flashbackreforged.replay.ServerConfigStore.restore(dir);
+        com.flurben.flashbackreforged.perf.Perf.end("open.restoreConfigs", configStart);
 
         ReplayPlayer player = new ReplayPlayer(dir, meta);
+        player.chunkContent.defaultReturnValue(-1L);
         active = player;
         try {
             player.loadSegment(0);
@@ -137,6 +163,7 @@ public final class ReplayPlayer {
             player.close();
             throw t;
         }
+        com.flurben.flashbackreforged.perf.Perf.end("open.total", openStart);
         FlashbackReforged.LOGGER.info("Opened replay {} ({} ticks, {} segments)", meta.name, meta.totalTicks, meta.segments.size());
         return player;
     }
@@ -299,8 +326,82 @@ public final class ReplayPlayer {
     }
 
     private void loadSegment(int index) throws IOException {
-        this.segment = new SegmentReader(this.dir.resolve(this.meta.segments.get(index).file));
+        this.segment = new SegmentReader(this.files.segment(index));
+        this.blobs = this.files.blobsFor(index);
+        this.blobFileId = this.files.blobFileId(index);
         this.segmentIndex = index;
+    }
+
+    /**
+     * Notes what the snapshot at the start of this segment contains and unpacks the parts that will be needed, all at once.
+     * Leaves the cursor at the start.
+     */
+    private void scanSnapshot() {
+        this.segment.rewind();
+        this.snapshotChunks.clear();
+        long[] needed = new long[1024];
+        int count = 0;
+        while (this.segment.next() && this.segment.type != EntryType.SNAPSHOT_END) {
+            if (this.segment.type == EntryType.BLOB_REF) {
+                long offset = this.segment.readBlobOffset();
+                if (this.segment.blobIsChunk()) {
+                    long pos = ChunkPos.asLong(this.segment.blobChunkX(), this.segment.blobChunkZ());
+                    this.snapshotChunks.add(pos);
+                    if (this.chunkContent.get(pos) == contentId(offset, this.segment.blobChangeHash())) continue;
+                }
+                if (count == needed.length) needed = java.util.Arrays.copyOf(needed, count * 2);
+                needed[count++] = offset;
+            } else if (this.segment.type == EntryType.PACKET) {
+                int at = PacketPolicy.chunkCoordinatesOffset(this.segment.data(), this.segment.payloadOffset, this.segment.payloadLength);
+                if (at >= 0) {
+                    var coords = java.nio.ByteBuffer.wrap(this.segment.data(), at, 8);
+                    this.snapshotChunks.add(ChunkPos.asLong(coords.getInt(), coords.getInt()));
+                }
+            }
+        }
+        if (this.blobs != null) this.blobs.preload(java.util.Arrays.copyOf(needed, count));
+        this.segment.rewind();
+    }
+
+    /** Which stored copy of a chunk, in which file, with which changes on top. */
+    private long contentId(long offset, long changeHash) {
+        return (offset | (long) this.blobFileId << 48) ^ changeHash * 0xC6A4A7935BD1E995L;
+    }
+
+    /** Called when something outside the recording changes a block, so a later seek knows the chunk isn't as stored. */
+    public void chunkChanged(net.minecraft.core.BlockPos pos) {
+        this.chunkContent.remove(ChunkPos.asLong(pos));
+    }
+
+    /** The loaded chunk, if it's there to be kept. */
+    private net.minecraft.world.level.chunk.LevelChunk loadedChunk(int x, int z) {
+        return this.mc.level == null ? null : this.mc.level.getChunkSource().getChunk(x, z, false);
+    }
+
+    /**
+     * Vanilla's block entities only change through packets this class sees. A mod's can also change through its own
+     * channels, which can't be followed, so those get put back as stored.
+     */
+    private static boolean hasModdedBlockEntities(net.minecraft.world.level.chunk.LevelChunk chunk) {
+        for (var blockEntity : chunk.getBlockEntities().values()) {
+            var id = net.minecraft.world.level.block.entity.BlockEntityType.getKey(blockEntity.getType());
+            if (id == null || !id.getNamespace().equals("minecraft")) return true;
+        }
+        return false;
+    }
+
+    /** Puts a kept chunk's block entities back as stored, without touching its blocks, so nothing needs rebuilding. */
+    private void restoreBlockEntities(byte[] data) {
+        try {
+            if (!(PacketCodec.decode(new FriendlyByteBuf(Unpooled.wrappedBuffer(data))) instanceof ClientboundLevelChunkWithLightPacket packet)) return;
+            ClientLevel level = this.mc.level;
+            packet.getChunkData().getBlockEntitiesTagsConsumer(packet.getX(), packet.getZ()).accept((pos, type, tag) -> {
+                var blockEntity = level.getBlockEntity(pos);
+                if (blockEntity != null && tag != null) blockEntity.handleUpdateTag(tag);
+            });
+        } catch (Throwable t) {
+            noteFailure("block entities", t);
+        }
     }
 
     /**
@@ -319,6 +420,7 @@ public final class ReplayPlayer {
                     boolean fresh = this.meta.segments.get(this.segmentIndex + 1).discontinuity;
                     loadSegment(this.segmentIndex + 1);
                     if (fresh) {
+                        scanSnapshot();
                         resetWorld();
                         applySnapshot();
                         settleEntities();
@@ -344,6 +446,7 @@ public final class ReplayPlayer {
     }
 
     private void applySnapshot() {
+        long start = com.flurben.flashbackreforged.perf.Perf.start();
         this.inSnapshot = true;
         this.fastForwarding = true;
         try {
@@ -353,6 +456,7 @@ public final class ReplayPlayer {
             this.inSnapshot = false;
             this.fastForwarding = false;
         }
+        com.flurben.flashbackreforged.perf.Perf.end("replay.applySnapshot", start);
     }
 
     /**
@@ -400,14 +504,22 @@ public final class ReplayPlayer {
         boolean sameSegmentForward = targetSegment == this.segmentIndex && worldTarget >= this.worldTick;
         try {
             if (!sameSegmentForward) {
+                if (targetSegment != this.segmentIndex) loadSegment(targetSegment);
+                long scanStart = com.flurben.flashbackreforged.perf.Perf.start();
+                scanSnapshot();
+                com.flurben.flashbackreforged.perf.Perf.end("seek.scanSnapshot", scanStart);
+                long resetStart = com.flurben.flashbackreforged.perf.Perf.start();
                 resetWorld();
-                if (targetSegment == this.segmentIndex) this.segment.rewind();
-                else loadSegment(targetSegment);
+                com.flurben.flashbackreforged.perf.Perf.end("seek.resetWorld", resetStart);
                 this.worldTick = this.meta.segments.get(targetSegment).startTick;
                 applySnapshot();
             }
             this.fastForwarding = true;
+            long forwardStart = com.flurben.flashbackreforged.perf.Perf.start();
+            int forwardFrom = this.worldTick;
             while (this.worldTick < worldTarget && advanceOneTick()) this.worldTick++;
+            com.flurben.flashbackreforged.perf.Perf.end("seek.fastForward", forwardStart);
+            com.flurben.flashbackreforged.perf.Perf.peak("seek.fastForwardTicks", this.worldTick - forwardFrom);
         } catch (IOException e) {
             FlashbackReforged.LOGGER.error("Seek failed", e);
         } finally {
@@ -426,12 +538,14 @@ public final class ReplayPlayer {
             this.mc.setCameraEntity(entity == null ? this.mc.player : entity);
         }
         this.editor.onSeek(this.tick);
+        com.flurben.flashbackreforged.perf.Perf.add("seek.total", System.nanoTime() - start);
         FlashbackReforged.LOGGER.debug("Seek to {} took {} ms", target, (System.nanoTime() - start) / 1_000_000);
     }
 
     /**
      * Removes everything the next snapshot will recreate. The ClientLevel survives, because replacing it would make
-     * shaders, Embeddium and DH tear down all their per-world state on every backward seek.
+     * shaders, Embeddium and DH tear down all their per-world state on every backward seek. Chunks the snapshot also has
+     * are left in place, to be replaced or kept as it's applied, so the world doesn't go missing and need rebuilding.
      */
     private void resetWorld() {
         ClientLevel level = this.mc.level;
@@ -451,7 +565,8 @@ public final class ReplayPlayer {
         int cz = last != null ? last.getZ() : center.z;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                if (level.getChunkSource().getChunk(cx + dx, cz + dz, false) != null) {
+                if (!this.snapshotChunks.contains(ChunkPos.asLong(cx + dx, cz + dz)) && level.getChunkSource().getChunk(cx + dx, cz + dz, false) != null) {
+                    this.chunkContent.remove(ChunkPos.asLong(cx + dx, cz + dz));
                     guardedHandle(new ClientboundForgetLevelChunkPacket(cx + dx, cz + dz));
                 }
             }
@@ -491,8 +606,12 @@ public final class ReplayPlayer {
 
     private void applyEntry() {
         EntryType type = this.segment.type;
+        this.payloadData = this.segment.data();
+        this.payloadOffset = this.segment.payloadOffset;
+        this.payloadLength = this.segment.payloadLength;
         switch (type) {
             case PACKET -> applyPacket();
+            case BLOB_REF -> applyBlobReference();
             case LOCAL_POSE -> applyPose();
             case LOCAL_HUD -> {
                 try {
@@ -509,8 +628,50 @@ public final class ReplayPlayer {
         }
     }
 
+    private void applyBlobReference() {
+        long offset = this.segment.readBlobOffset();
+        boolean isChunk = this.segment.blobIsChunk();
+        int x = isChunk ? this.segment.blobChunkX() : 0, z = isChunk ? this.segment.blobChunkZ() : 0;
+        long pos = isChunk ? ChunkPos.asLong(x, z) : 0;
+        int changes = isChunk ? this.segment.blobChanges() : 0;
+        long id = contentId(offset, isChunk ? this.segment.blobChangeHash() : 0);
+        // Already showing exactly this, so there's nothing to do, and nothing for the renderer to rebuild.
+        var kept = isChunk && this.inSnapshot && this.chunkContent.get(pos) == id ? loadedChunk(x, z) : null;
+        if (kept != null && !hasModdedBlockEntities(kept)) {
+            com.flurben.flashbackreforged.perf.Perf.add("seek.chunkKept", 0);
+            for (int i = 0; i < changes; i++) this.segment.next();
+            return;
+        }
+        byte[] data = null;
+        try {
+            if (this.blobs != null) data = this.blobs.get(offset);
+        } catch (IOException e) {
+            noteFailure("blob", e);
+        }
+        if (data == null) {
+            for (int i = 0; i < changes; i++) this.segment.next();
+            return;
+        }
+        if (kept != null) {
+            com.flurben.flashbackreforged.perf.Perf.add("seek.chunkKeptRestoringBlockEntities", 0);
+            restoreBlockEntities(data);
+        } else {
+            this.payloadData = data;
+            this.payloadOffset = 0;
+            this.payloadLength = data.length;
+            if (!applyPacket()) isChunk = false;
+        }
+        // These are part of what the chunk is, so they don't count as it having been changed since.
+        this.applyingChunkChanges = true;
+        for (int i = 0; i < changes && this.segment.next(); i++) applyEntry();
+        this.applyingChunkChanges = false;
+        if (isChunk) this.chunkContent.put(pos, id);
+    }
+
+    private boolean applyingChunkChanges;
+
     private FriendlyByteBuf buffer() {
-        return new FriendlyByteBuf(Unpooled.wrappedBuffer(this.segment.data(), this.segment.payloadOffset, this.segment.payloadLength));
+        return new FriendlyByteBuf(Unpooled.wrappedBuffer(this.payloadData, this.payloadOffset, this.payloadLength));
     }
 
     private void applyPose() {
@@ -532,40 +693,70 @@ public final class ReplayPlayer {
         }
     }
 
+    /** @return whether the packet was given to the game. */
     @SuppressWarnings("unchecked")
-    private void applyPacket() {
+    private boolean applyPacket() {
+        // Decided from the id, because decoding something only to throw it away adds up across a long seek.
+        int id = this.payloadLength > 0 ? PacketPolicy.readId(this.payloadData, this.payloadOffset) : -1;
+        if (PacketPolicy.dropAtPlayback(id)) return false;
+        if (this.fastForwarding && PacketPolicy.isTransientEffect(id)) return false;
+        if (this.loggedIn && PacketPolicy.isLogin(id)) return false;
+        if (this.loggedIn && this.tagsApplied && PacketPolicy.isTags(id)) return false;
+
         Packet<?> packet;
+        long decodeStart = com.flurben.flashbackreforged.perf.Perf.start();
         try {
             packet = PacketCodec.decode(buffer());
         } catch (Throwable t) {
             noteFailure("decode", t);
-            return;
+            return false;
         }
-        if (packet == null || PacketPolicy.dropAtPlayback(packet)) return;
-        if (this.fastForwarding && PacketPolicy.isTransientEffect(packet)) return;
+        com.flurben.flashbackreforged.perf.Perf.end(this.fastForwarding ? "packet.decodeSeeking" : "packet.decodePlaying", decodeStart);
+        if (packet == null) return false;
 
         if (packet instanceof ClientboundLoginPacket login) {
-            if (this.loggedIn) return;
             this.loggedIn = true;
+            this.chunkContent.clear();
             packet = forViewer(login);
             guardedHandle(packet);
             installViewerInfo();
-            return;
+            return true;
         }
-        if (packet instanceof ClientboundUpdateTagsPacket && this.loggedIn && this.tagsApplied) return;
         if (packet instanceof ClientboundUpdateTagsPacket) this.tagsApplied = true;
         if (packet instanceof ClientboundSetChunkCacheCenterPacket center) this.lastCenter = center;
         if (packet instanceof ClientboundRespawnPacket respawn) {
             // Replacing the viewer is only needed when the dimension really changes.
-            if (this.mc.level != null && respawn.getDimension() == this.mc.level.dimension()) return;
+            if (this.mc.level != null && respawn.getDimension() == this.mc.level.dimension()) return true;
+            this.chunkContent.clear();
             packet = forViewer(respawn);
             guardedHandle(packet);
             installViewerInfo();
             if (!this.inSnapshot) this.viewerPlaced = false;
             if (!this.inSnapshot && this.mc.screen != null) this.mc.setScreen(null);
-            return;
+            return true;
         }
+        if (!this.applyingChunkChanges) noteChunkChange(packet);
         guardedHandle(packet);
+        return true;
+    }
+
+    /** Keeps {@link #chunkContent} honest. */
+    private void noteChunkChange(Packet<?> packet) {
+        if (packet instanceof ClientboundBlockUpdatePacket p) {
+            chunkChanged(p.getPos());
+        } else if (packet instanceof ClientboundSectionBlocksUpdatePacket p) {
+            p.runUpdates((pos, state) -> chunkChanged(pos));
+        } else if (packet instanceof ClientboundBlockEntityDataPacket p) {
+            chunkChanged(p.getPos());
+        } else if (packet instanceof ClientboundLightUpdatePacket p) {
+            this.chunkContent.remove(ChunkPos.asLong(p.getX(), p.getZ()));
+        } else if (packet instanceof ClientboundForgetLevelChunkPacket p) {
+            this.chunkContent.remove(ChunkPos.asLong(p.getX(), p.getZ()));
+        } else if (packet instanceof ClientboundLevelChunkWithLightPacket p) {
+            this.chunkContent.remove(ChunkPos.asLong(p.getX(), p.getZ()));
+        } else if (packet instanceof ClientboundExplodePacket) {
+            this.chunkContent.clear();
+        }
     }
 
     private boolean tagsApplied;
@@ -573,13 +764,17 @@ public final class ReplayPlayer {
 
     @SuppressWarnings("unchecked")
     private void guardedHandle(Packet<?> packet) {
+        long start = com.flurben.flashbackreforged.perf.Perf.start();
         try {
             ((Packet<ClientGamePacketListener>) packet).handle(this.listener);
             this.packetsApplied++;
+            if (start != 0) {
+                String name = packet instanceof ClientboundCustomPayloadPacket custom ? "custom:" + custom.getIdentifier() : packet.getClass().getSimpleName();
+                com.flurben.flashbackreforged.perf.Perf.add((this.fastForwarding ? "handleSeeking:" : "handlePlaying:") + name, System.nanoTime() - start);
+            }
         } catch (Throwable t) {
             if (this.inSnapshot && packet instanceof ClientboundCustomPayloadPacket) {
-                int offset = this.segment.payloadOffset;
-                this.deferredPayloads.add(java.util.Arrays.copyOfRange(this.segment.data(), offset, offset + this.segment.payloadLength));
+                this.deferredPayloads.add(java.util.Arrays.copyOfRange(this.payloadData, this.payloadOffset, this.payloadOffset + this.payloadLength));
             } else {
                 noteFailure(packet.getClass().getSimpleName(), t);
             }
@@ -645,6 +840,7 @@ public final class ReplayPlayer {
         this.mc.options.hideGui = false;
         com.flurben.flashbackreforged.client.SpectatorHud.endFrame();
         this.editor.save();
+        this.files.close();
         setSpeedNoCheck();
         this.connection.shutdown();
         DistantHorizonsCompat.onReplayClosed();

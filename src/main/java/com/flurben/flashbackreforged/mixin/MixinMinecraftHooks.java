@@ -25,7 +25,18 @@ public abstract class MixinMinecraftHooks {
 
     @Inject(method = "runTick", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/platform/Window;updateDisplay()V"))
     private void flashbackreforged$drawEditor(boolean ticking, CallbackInfo ci) {
+        long start = com.flurben.flashbackreforged.perf.Perf.start();
         EditorUi.get().render();
+        com.flurben.flashbackreforged.perf.Perf.end("frame.editorUi", start);
+        flashbackreforged$flipStart = com.flurben.flashbackreforged.perf.Perf.start();
+    }
+
+    @org.spongepowered.asm.mixin.Unique
+    private long flashbackreforged$flipStart;
+
+    @Inject(method = "runTick", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/platform/Window;updateDisplay()V", shift = At.Shift.AFTER))
+    private void flashbackreforged$flipped(boolean ticking, CallbackInfo ci) {
+        com.flurben.flashbackreforged.perf.Perf.end("frame.flip", flashbackreforged$flipStart);
     }
 
     /** Export as fast as the machine allows. */

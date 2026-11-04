@@ -23,6 +23,7 @@
   "flashback_reforged.browser.unfinished": " (unfinished, will be recovered)",
   "flashback_reforged.browser.missing_mods": "This replay was recorded with mods that are not loaded. Blocks and items may appear wrong. Open it anyway?",
   "flashback_reforged.browser.open_failed": "Could not open this replay",
+  "flashback_reforged.browser.combining": "Combining replays...",
   "flashback_reforged.browser.combine_failed": "Could not combine these replays",
   "flashback_reforged.browser.delete_confirm": "Delete \"%s\"?",
   "flashback_reforged.browser.delete_warning": "The recording and its editor project will be gone for good.",

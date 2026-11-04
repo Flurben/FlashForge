@@ -176,6 +176,7 @@ public final class ExportManager {
         /** Every frame drawn, including ones that aren't saved. */
         long clockFrames;
         boolean capturedThisFrame;
+        long frameStart;
         boolean sized;
         boolean cancel;
         boolean complete;
@@ -224,6 +225,8 @@ public final class ExportManager {
 
         /** Decides how far the clock moves this frame. This runs at the top of the frame, where world changes are safe. */
         int advance(net.minecraft.client.Timer timer) {
+            if (com.flurben.flashbackreforged.perf.Perf.on && this.frameStart != 0) com.flurben.flashbackreforged.perf.Perf.add("export.wholeFrame", System.nanoTime() - this.frameStart);
+            this.frameStart = System.nanoTime();
             if (this.cancel || this.complete || this.writer.error() != null) {
                 finish();
                 return -1;
@@ -236,7 +239,7 @@ public final class ExportManager {
 
             if (!this.sized) {
                 this.sized = true;
-                this.capture = new FrameCapture(this.renderWidth, this.renderHeight);
+                this.capture = new FrameCapture(this.renderWidth, this.renderHeight, this.writer);
                 this.mc.resizeDisplay();
             }
             this.replay.runPendingSeek();
@@ -259,7 +262,9 @@ public final class ExportManager {
             double renderedAt = this.position;
             int whole = (int) Math.floor(renderedAt);
             int ticks = Math.max(0, whole - this.reachedTick);
+            long stepStart = com.flurben.flashbackreforged.perf.Perf.start();
             for (int i = 0; i < ticks; i++) this.replay.step();
+            com.flurben.flashbackreforged.perf.Perf.end("export.replayStep", stepStart);
             this.reachedTick = whole;
             this.position = renderedAt + this.replay.editor().scene().speedAt(renderedAt) * 20.0 / this.settings.fps;
 
@@ -271,30 +276,27 @@ public final class ExportManager {
 
         void frameRendered() {
             if (!this.capturedThisFrame || this.capture == null) return;
-            submit(this.capture.capture(this.mc.getMainRenderTarget()));
+            long captureStart = com.flurben.flashbackreforged.perf.Perf.start();
+            this.capture.capture(this.mc.getMainRenderTarget());
+            com.flurben.flashbackreforged.perf.Perf.end("export.capture", captureStart);
             this.frame++;
+            long audioStart = com.flurben.flashbackreforged.perf.Perf.start();
             if (this.audio != null) this.audio.renderFrame();
+            com.flurben.flashbackreforged.perf.Perf.end("export.audio", audioStart);
             if (this.frame >= this.totalFrames) this.complete = true;
-        }
-
-        private void submit(byte[] frameData) {
-            if (frameData == null) return;
-            try {
-                this.writer.submit(frameData);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
         }
 
         void finish() {
             this.state = "Finishing";
-            if (this.capture != null) {
-                if (!this.cancel) {
-                    byte[] remaining;
-                    while ((remaining = this.capture.drainNext()) != null) submit(remaining);
-                }
-                this.capture.close();
+            boolean stopped = true;
+            if (this.cancel) {
+                // Before the memory it might be copying from goes away.
+                stopped = this.writer.abort();
+            } else if (this.capture != null) {
+                this.capture.drain();
             }
+            // If the writer somehow won't stop, leaking some memory beats pulling it out from under the writer.
+            if (this.capture != null && stopped) this.capture.close();
             job = null;
             // renderSize() is now null, so this restores the window's real size.
             this.mc.resizeDisplay();
@@ -303,13 +305,14 @@ public final class ExportManager {
             if (this.audio != null) this.audio.stop();
 
             if (this.cancel) {
-                this.writer.abort();
                 deleteWorkDir();
                 HISTORY.add(this.settings.name + " (cancelled)");
                 return;
             }
+            long finishStart = com.flurben.flashbackreforged.perf.Perf.start();
             try {
                 this.writer.finish();
+                com.flurben.flashbackreforged.perf.Perf.end("export.waitForEncoder", finishStart);
                 String error = this.writer.error();
                 if (error != null) throw new IOException(error + " " + String.join(" | ", tail(this.writer.encoderLog())));
                 Path output = finalizeOutput();

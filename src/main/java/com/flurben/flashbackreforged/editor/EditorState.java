@@ -239,14 +239,23 @@ public final class EditorState {
         }
     }
 
+    private static String lastFindText;
+    private static UUID lastFindId;
+
     private static Entity findEntity(String uuid) {
         Minecraft mc = Minecraft.getInstance();
-        try {
-            UUID id = UUID.fromString(uuid);
-            for (Entity e : mc.level.entitiesForRendering()) {
-                if (e.getUUID().equals(id)) return e;
+        // Asked every frame while a track follows an entity, for what's usually the same one as last time.
+        if (!uuid.equals(lastFindText)) {
+            lastFindText = uuid;
+            try {
+                lastFindId = UUID.fromString(uuid);
+            } catch (IllegalArgumentException e) {
+                lastFindId = null;
             }
-        } catch (IllegalArgumentException ignored) {
+        }
+        if (lastFindId == null) return null;
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (e.getUUID().equals(lastFindId)) return e;
         }
         return null;
     }
@@ -262,7 +271,9 @@ public final class EditorState {
             for (Keyframe k : range.values()) {
                 try {
                     BlockState state = BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK.asLookup(), k.text == null ? "minecraft:air" : k.text, false).blockState();
-                    mc.level.setBlock(BlockPos.containing(k.values[0], k.values[1], k.values[2]), state, 11);
+                    BlockPos pos = BlockPos.containing(k.values[0], k.values[1], k.values[2]);
+                    mc.level.setBlock(pos, state, 11);
+                    this.player.chunkChanged(pos);
                 } catch (Exception e) {
                     FlashbackReforged.LOGGER.debug("Bad block override {}", k.text, e);
                 }

@@ -83,8 +83,9 @@ public final class VisualsRuntime {
         Minecraft mc = Minecraft.getInstance();
         Entity source = null;
         if (v != null && v.audioSource != null && mc.level != null) {
+            UUID wanted = parse(v.audioSource);
             for (Entity e : mc.level.entitiesForRendering()) {
-                if (e.getUUID().toString().equals(v.audioSource)) {
+                if (e.getUUID().equals(wanted)) {
                     source = e;
                     break;
                 }
@@ -102,6 +103,22 @@ public final class VisualsRuntime {
         audioLook = new Vector3f((float) view.x, (float) view.y, (float) view.z);
         audioUp = new Vector3f((float) up.x, (float) up.y, (float) up.z);
         audioPosition = source.getEyePosition(partial);
+    }
+
+    private static String lastParsed;
+    private static UUID lastUuid;
+
+    /** Asked every frame for the same value, so remembering the last answer saves almost all the work. */
+    private static UUID parse(String id) {
+        if (!id.equals(lastParsed)) {
+            lastParsed = id;
+            try {
+                lastUuid = UUID.fromString(id);
+            } catch (IllegalArgumentException e) {
+                lastUuid = null;
+            }
+        }
+        return lastUuid;
     }
 
     public static Vec3 listenerPosition(Vec3 camera) {
@@ -153,9 +170,10 @@ public final class VisualsRuntime {
         Visuals v = visuals();
         if (v == null) return false;
         if (entity instanceof LocalPlayer) return false;
-        if (ExportManager.isExporting() && v.hiddenEntities.contains(entity.getUUID().toString())) return true;
+        // Asked for every entity every frame, so the sets are checked for being empty before making a string to look up.
+        if (ExportManager.isExporting() && !v.hiddenEntities.isEmpty() && v.hiddenEntities.contains(entity.getUUID().toString())) return true;
         if (entity instanceof Player player) {
-            if (!v.renderPlayers || v.hiddenPlayers.contains(player.getUUID().toString()) || (v.hideSpectators && player.isSpectator())) return true;
+            if (!v.renderPlayers || (!v.hiddenPlayers.isEmpty() && v.hiddenPlayers.contains(player.getUUID().toString())) || (v.hideSpectators && player.isSpectator())) return true;
         } else if (!v.renderEntities) {
             return true;
         }
@@ -165,7 +183,7 @@ public final class VisualsRuntime {
     /** Null leaves the entity's own glow alone. */
     public static Boolean glowOverride(Entity entity) {
         Visuals v = visuals();
-        if (v == null) return null;
+        if (v == null || (v.noGlowEntities.isEmpty() && v.glowingEntities.isEmpty())) return null;
         String id = entity.getUUID().toString();
         if (v.noGlowEntities.contains(id)) return false;
         return v.glowingEntities.contains(id) ? Boolean.TRUE : null;
@@ -173,7 +191,7 @@ public final class VisualsRuntime {
 
     public static boolean hideCape(Entity entity) {
         Visuals v = visuals();
-        return v != null && v.hiddenCapes.contains(entity.getUUID().toString());
+        return v != null && !v.hiddenCapes.isEmpty() && v.hiddenCapes.contains(entity.getUUID().toString());
     }
 
     private static String typeId(Entity entity) {
@@ -212,7 +230,7 @@ public final class VisualsRuntime {
         public static void nameTag(RenderNameTagEvent event) {
             Visuals v = visuals();
             if (v == null) return;
-            if (!v.renderNametags || v.hiddenNametags.contains(event.getEntity().getUUID().toString())) event.setResult(Event.Result.DENY);
+            if (!v.renderNametags || (!v.hiddenNametags.isEmpty() && v.hiddenNametags.contains(event.getEntity().getUUID().toString()))) event.setResult(Event.Result.DENY);
         }
 
         @SubscribeEvent

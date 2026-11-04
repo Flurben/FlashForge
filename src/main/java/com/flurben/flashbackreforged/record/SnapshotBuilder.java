@@ -31,6 +31,7 @@ import net.minecraft.world.scores.Score;
 import net.minecraft.world.scores.Scoreboard;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -44,7 +45,84 @@ import java.util.function.Consumer;
 final class SnapshotBuilder {
     private SnapshotBuilder() {}
 
-    static void write(Consumer<byte[]> out, SessionJournal journal) {
+    /**
+     * A snapshot being written. What must describe one moment is taken when this is created. Chunks are encoded as time
+     * allows, and everything that has to follow them is held here until they're done.
+     */
+    static final class Task {
+        private final Emitter chunksOut;
+        private final ReplayWriter writer;
+        private final ChunkVersions versions;
+        private final ClientLevel level;
+        private final long[] chunks;
+        private final List<byte[]> last = new ArrayList<>();
+        private List<byte[]> payloads = List.of();
+        private int next;
+
+        private Task(Emitter chunksOut, ReplayWriter writer, ChunkVersions versions, ClientLevel level, long[] chunks) {
+            this.chunksOut = chunksOut;
+            this.writer = writer;
+            this.versions = versions;
+            this.level = level;
+            this.chunks = chunks;
+        }
+
+        void addLast(byte[] encoded) {
+            this.last.add(encoded);
+        }
+
+        /** @return true once there are no chunks left. */
+        boolean step(long budgetNanos) {
+            // A dimension change makes the rest of the list mean different chunks. The new ones are in the stream already.
+            if (Minecraft.getInstance().level != this.level) this.next = this.chunks.length;
+            long deadline = System.nanoTime() + budgetNanos;
+            while (this.next < this.chunks.length) {
+                long pos = this.chunks[this.next++];
+                LevelChunk chunk = this.level.getChunkSource().getChunk(ChunkPos.getX(pos), ChunkPos.getZ(pos), false);
+                if (chunk != null && !chunk.isEmpty()) writeChunk(pos, chunk);
+                if (System.nanoTime() >= deadline) break;
+            }
+            return this.next >= this.chunks.length;
+        }
+
+        private void writeChunk(long pos, LevelChunk chunk) {
+            ChunkVersions.Usable stored = this.versions.usable(pos, !onlyVanillaBlockEntities(chunk));
+            if (stored != null) {
+                this.writer.reuseChunk(stored, pos);
+                for (byte[] change : stored.changes()) this.writer.entry(com.flurben.flashbackreforged.replay.EntryType.PACKET, change);
+                com.flurben.flashbackreforged.perf.Perf.add("snapshot.chunkReused", 0);
+                return;
+            }
+            try {
+                long start = com.flurben.flashbackreforged.perf.Perf.start();
+                byte[] bytes = PacketCodec.encode(new ClientboundLevelChunkWithLightPacket(chunk, this.level.getLightEngine(), null, null));
+                com.flurben.flashbackreforged.perf.Perf.end("snapshot.oneChunk", start);
+                if (bytes == null) return;
+                ChunkVersions.Version version = new ChunkVersions.Version();
+                this.writer.chunk(bytes, version);
+                this.versions.encoded(pos, version);
+            } catch (Throwable t) {
+                this.chunksOut.failure("chunk " + chunk.getPos(), t);
+            }
+        }
+
+        private static boolean onlyVanillaBlockEntities(LevelChunk chunk) {
+            for (var blockEntity : chunk.getBlockEntities().values()) {
+                var id = net.minecraft.world.level.block.entity.BlockEntityType.getKey(blockEntity.getType());
+                if (id == null || !id.getNamespace().equals("minecraft")) return false;
+            }
+            return true;
+        }
+
+        void writeLast(Consumer<byte[]> out, Consumer<byte[]> payloadOut) {
+            this.last.forEach(out);
+            // Last, so handlers that attach data to chunks and entities find them loaded.
+            this.payloads.forEach(payloadOut);
+        }
+    }
+
+    /** @param session whether to include what's the same for a whole session, which playback only ever needs once. */
+    static Task begin(Consumer<byte[]> out, ReplayWriter writer, ChunkVersions versions, SessionJournal journal, boolean session) {
         Minecraft mc = Minecraft.getInstance();
         ClientLevel level = mc.level;
         ClientPacketListener listener = mc.getConnection();
@@ -52,7 +130,11 @@ final class SnapshotBuilder {
         if (level == null || listener == null || self == null) throw new IllegalStateException("No world to snapshot");
 
         Emitter e = new Emitter(out);
-        e.emit(journal.login());
+        if (session) {
+            // These two take real time to encode in a big pack, and nothing else touches them, so that happens elsewhere.
+            writer.packet(journal.login());
+            if (journal.tags() != null) writer.packet(journal.tags());
+        }
         journal.preamble().forEach(e::emit);
         e.emit(new ClientboundRespawnMarker(level, self).packet());
 
@@ -76,28 +158,30 @@ final class SnapshotBuilder {
             }
         });
 
-        writeChunks(e, level, self);
-        writeEntities(e, level, self);
-        journal.maps().forEach(e::emit);
+        Task task = new Task(e, writer, versions, level, loadedChunks(level, self));
+        // Entities and the rest describe this moment, but go after the chunks, so they wait in memory.
+        Emitter later = new Emitter(task::addLast);
+        long entitiesStart = com.flurben.flashbackreforged.perf.Perf.start();
+        writeEntities(later, level, self);
+        com.flurben.flashbackreforged.perf.Perf.end("snapshot.entities", entitiesStart);
+        journal.maps().forEach(later::emit);
 
-        // Last, so handlers that attach data to chunks and entities find them loaded.
-        for (byte[] payload : journal.payloads()) out.accept(payload);
+        task.payloads = journal.payloads();
+        com.flurben.flashbackreforged.perf.Perf.peak("journal.payloadCount", task.payloads.size());
+        return task;
     }
 
-    private static void writeChunks(Emitter e, ClientLevel level, LocalPlayer self) {
+    private static long[] loadedChunks(ClientLevel level, LocalPlayer self) {
         int radius = Minecraft.getInstance().options.getEffectiveRenderDistance() + 3;
         ChunkPos center = self.chunkPosition();
+        long[] found = new long[(2 * radius + 1) * (2 * radius + 1)];
+        int count = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                LevelChunk chunk = level.getChunkSource().getChunk(center.x + dx, center.z + dz, false);
-                if (chunk == null || chunk.isEmpty()) continue;
-                try {
-                    e.emit(new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null));
-                } catch (Throwable t) {
-                    e.failure("chunk " + chunk.getPos(), t);
-                }
+                if (level.getChunkSource().getChunk(center.x + dx, center.z + dz, false) != null) found[count++] = ChunkPos.asLong(center.x + dx, center.z + dz);
             }
         }
+        return Arrays.copyOf(found, count);
     }
 
     private static void writeEntities(Emitter e, ClientLevel level, LocalPlayer self) {

@@ -3,12 +3,13 @@ package com.flurben.flashbackreforged.playback;
 import com.flurben.flashbackreforged.FlashbackReforged;
 import com.flurben.flashbackreforged.replay.EntryType;
 
-import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipException;
 
@@ -25,17 +26,45 @@ final class SegmentReader {
     int payloadOffset;
     int payloadLength;
 
+    SegmentReader(byte[] data) {
+        this.data = data;
+        this.size = data.length;
+    }
+
     SegmentReader(Path file) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(1 << 20);
-        try (InputStream in = new GZIPInputStream(Files.newInputStream(file), 1 << 16)) {
-            byte[] buffer = new byte[1 << 16];
+        this(read(file));
+    }
+
+    /** Safe on any thread. */
+    static byte[] read(Path file) throws IOException {
+        byte[] packed = Files.readAllBytes(file);
+        byte[] out = new byte[sizeHint(packed)];
+        int at = 0;
+        try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(packed), 1 << 16)) {
             int read;
-            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+            while ((read = in.read(out, at, out.length - at)) >= 0) {
+                at += read;
+                if (at == out.length) {
+                    // The size was right if this is the end, and otherwise there's more than it said.
+                    int next = in.read();
+                    if (next < 0) break;
+                    out = Arrays.copyOf(out, out.length * 2);
+                    out[at++] = (byte) next;
+                }
+            }
         } catch (EOFException | ZipException e) {
-            FlashbackReforged.LOGGER.warn("Segment {} is truncated; using the {} bytes that could be read", file.getFileName(), out.size());
+            FlashbackReforged.LOGGER.warn("Segment {} is truncated; using the {} bytes that could be read", file.getFileName(), at);
         }
-        this.data = out.toByteArray();
-        this.size = this.data.length;
+        return at == out.length ? out : Arrays.copyOf(out, at);
+    }
+
+    /** A finished gzip file ends with its original size. A crashed recording's doesn't, so this is only a starting point. */
+    private static int sizeHint(byte[] packed) {
+        int fallback = Math.max(1 << 16, packed.length * 4);
+        if (packed.length < 18) return fallback;
+        int n = packed.length;
+        int size = (packed[n - 4] & 0xFF) | (packed[n - 3] & 0xFF) << 8 | (packed[n - 2] & 0xFF) << 16 | (packed[n - 1] & 0xFF) << 24;
+        return size >= packed.length / 2 && size <= Math.min(1L << 30, packed.length * 1032L) ? Math.max(size, 1) : fallback;
     }
 
     byte[] data() {
@@ -75,6 +104,49 @@ final class SegmentReader {
             if (this.type != null) return true;
         }
         return false;
+    }
+
+    /** For a {@link EntryType#BLOB_REF} entry. */
+    long readBlobOffset() {
+        long value = 0;
+        int at = this.payloadOffset;
+        for (int shift = 0; at < this.payloadOffset + this.payloadLength && shift < 63; shift += 7) {
+            byte b = this.data[at++];
+            value |= (long) (b & 0x7F) << shift;
+            if ((b & 0x80) == 0) {
+                this.blobHeaderEnd = at;
+                return value;
+            }
+        }
+        throw new IllegalStateException("Bad blob reference");
+    }
+
+    private int blobHeaderEnd;
+
+    /** After {@link #readBlobOffset}: whether this reference says which chunk it is. */
+    boolean blobIsChunk() {
+        return this.payloadOffset + this.payloadLength - this.blobHeaderEnd >= 8;
+    }
+
+    int blobChunkX() {
+        return readInt(this.blobHeaderEnd);
+    }
+
+    int blobChunkZ() {
+        return readInt(this.blobHeaderEnd + 4);
+    }
+
+    /** How many entries after this one bring the stored chunk up to date. */
+    int blobChanges() {
+        return this.payloadOffset + this.payloadLength - this.blobHeaderEnd >= 20 ? readInt(this.blobHeaderEnd + 8) : 0;
+    }
+
+    long blobChangeHash() {
+        return blobChanges() == 0 ? 0 : (long) readInt(this.blobHeaderEnd + 12) << 32 | readInt(this.blobHeaderEnd + 16) & 0xFFFFFFFFL;
+    }
+
+    private int readInt(int at) {
+        return (this.data[at] & 0xFF) << 24 | (this.data[at + 1] & 0xFF) << 16 | (this.data[at + 2] & 0xFF) << 8 | (this.data[at + 3] & 0xFF);
     }
 
     /** Number of completed ticks in the segment. */

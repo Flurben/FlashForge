@@ -59,6 +59,38 @@ public final class ReplayBrowserScreen extends Screen {
     private EditBox nameBox;
     private Button open, rename, delete, combine;
     private ReplayStorage.Entry combineFirst;
+    /** What's on disk, once that's been read. */
+    private List<Found> found;
+    private boolean closed;
+
+    private record Found(ReplayStorage.Entry entry, long bytes) {}
+
+    /** A long list of recordings means a lot of small reads, which shouldn't be holding up a frame. */
+    private void loadList() {
+        Util.backgroundExecutor().execute(() -> {
+            long start = com.flurben.flashbackreforged.perf.Perf.start();
+            List<Found> all = new ArrayList<>();
+            for (ReplayStorage.Entry e : ReplayStorage.list()) all.add(new Found(e, size(e.dir())));
+            com.flurben.flashbackreforged.perf.Perf.end("browser.list", start);
+            this.minecraft.execute(() -> {
+                this.found = all;
+                if (!this.closed) showFound();
+            });
+        });
+    }
+
+    private void showFound() {
+        for (Found f : this.found) this.list.addRow(new Row(f.entry, f.bytes));
+        this.list.applySort();
+    }
+
+    private static long size(Path dir) {
+        try (Stream<Path> files = Files.walk(dir)) {
+            return files.filter(Files::isRegularFile).mapToLong(p -> p.toFile().length()).sum();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
 
     public ReplayBrowserScreen(Screen parent) {
         super(Component.translatable("flashback_reforged.browser.title"));
@@ -68,8 +100,12 @@ public final class ReplayBrowserScreen extends Screen {
     @Override
     protected void init() {
         this.list = new ReplayList(this.minecraft, this.width, this.height, 32, this.height - 80, 36);
-        for (ReplayStorage.Entry e : ReplayStorage.list()) this.list.addRow(new Row(e));
-        this.list.applySort();
+        // Resizing the window comes back through here, and there's no need to read everything again for that.
+        if (this.found == null) {
+            loadList();
+        } else {
+            showFound();
+        }
         addRenderableWidget(this.list);
         addRenderableWidget(Button.builder(sortLabel(), b -> {
             sort = Sort.values()[(sort.ordinal() + 1) % Sort.values().length];
@@ -107,7 +143,13 @@ public final class ReplayBrowserScreen extends Screen {
     /** Lets go of the thumbnails, which are textures on the graphics card. */
     @Override
     public void removed() {
+        this.closed = true;
         for (Row row : this.list.children()) row.releaseIcon();
+    }
+
+    @Override
+    public void added() {
+        this.closed = false;
     }
 
     private ReplayStorage.Entry selected() {
@@ -191,14 +233,21 @@ public final class ReplayBrowserScreen extends Screen {
             updateButtons();
             return;
         }
-        try {
-            ReplayCombiner.combine(this.combineFirst.dir(), entry.dir());
-            this.minecraft.setScreen(new ReplayBrowserScreen(this.parent));
-        } catch (IOException e) {
-            FlashbackReforged.LOGGER.error("Could not combine replays", e);
-            this.minecraft.setScreen(new AlertScreen(() -> this.minecraft.setScreen(new ReplayBrowserScreen(this.parent)),
-                    Component.translatable("flashback_reforged.browser.combine_failed"), Component.literal(String.valueOf(e.getMessage()))));
-        }
+        // Copies whole recordings, which can take a while.
+        Path first = this.combineFirst.dir();
+        Minecraft mc = this.minecraft;
+        Screen parent = this.parent;
+        mc.setScreen(new net.minecraft.client.gui.screens.GenericDirtMessageScreen(Component.translatable("flashback_reforged.browser.combining")));
+        Util.ioPool().execute(() -> {
+            try {
+                ReplayCombiner.combine(first, entry.dir());
+                mc.execute(() -> mc.setScreen(new ReplayBrowserScreen(parent)));
+            } catch (IOException e) {
+                FlashbackReforged.LOGGER.error("Could not combine replays", e);
+                mc.execute(() -> mc.setScreen(new AlertScreen(() -> mc.setScreen(new ReplayBrowserScreen(parent)),
+                        Component.translatable("flashback_reforged.browser.combine_failed"), Component.literal(String.valueOf(e.getMessage())))));
+            }
+        });
     }
 
     @Override
@@ -206,7 +255,7 @@ public final class ReplayBrowserScreen extends Screen {
         renderBackground(graphics);
         super.render(graphics, mouseX, mouseY, partial);
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
-        if (this.list.children().isEmpty()) {
+        if (this.found != null && this.list.children().isEmpty()) {
             graphics.drawCenteredString(this.font, Component.translatable("flashback_reforged.browser.empty"), this.width / 2, this.height / 2 - 20, 0xA0A0A0);
         }
     }
@@ -255,43 +304,47 @@ public final class ReplayBrowserScreen extends Screen {
         final long bytes;
         private ResourceLocation icon;
         private boolean iconLoaded;
+        private int iconGeneration;
         private long lastClick;
 
-        Row(ReplayStorage.Entry entry) {
+        Row(ReplayStorage.Entry entry, long bytes) {
             this.entry = entry;
             int seconds = entry.meta().totalTicks / 20;
             String when = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(entry.meta().createdAt));
-            this.bytes = size(entry.dir());
+            this.bytes = bytes;
             String size = this.bytes > 1 << 30 ? String.format("%.1f GB", this.bytes / (double) (1 << 30)) : String.format("%.1f MB", this.bytes / (double) (1 << 20));
             this.details = entry.meta().world + "  -  " + when + "  -  " + String.format("%d:%02d", seconds / 60, seconds % 60) + "  -  " + size;
-        }
-
-        private static long size(Path dir) {
-            try (Stream<Path> files = Files.walk(dir)) {
-                return files.filter(Files::isRegularFile).mapToLong(p -> p.toFile().length()).sum();
-            } catch (IOException e) {
-                return 0;
-            }
         }
 
         /** Loaded on first draw, so a long list doesn't load pictures nobody scrolled to. */
         private void loadIcon() {
             this.iconLoaded = true;
             Path file = this.entry.dir().resolve(com.flurben.flashbackreforged.record.Thumbnails.FILE);
-            if (!Files.exists(file)) return;
-            try (InputStream in = Files.newInputStream(file)) {
-                this.icon = new ResourceLocation(FlashbackReforged.MOD_ID, "replay_icon/" + Integer.toHexString(this.entry.dir().toString().hashCode()));
-                Minecraft.getInstance().getTextureManager().register(this.icon, new DynamicTexture(NativeImage.read(in)));
-            } catch (IOException e) {
-                FlashbackReforged.LOGGER.warn("Could not read thumbnail {}", file, e);
-                this.icon = null;
-            }
+            int generation = ++this.iconGeneration;
+            Util.ioPool().execute(() -> {
+                if (!Files.exists(file)) return;
+                try (InputStream in = Files.newInputStream(file)) {
+                    NativeImage image = NativeImage.read(in);
+                    Minecraft.getInstance().execute(() -> {
+                        // The row may have been let go of while this was loading.
+                        if (generation != this.iconGeneration || !this.iconLoaded) {
+                            image.close();
+                            return;
+                        }
+                        this.icon = new ResourceLocation(FlashbackReforged.MOD_ID, "replay_icon/" + Integer.toHexString(this.entry.dir().toString().hashCode()));
+                        Minecraft.getInstance().getTextureManager().register(this.icon, new DynamicTexture(image));
+                    });
+                } catch (IOException e) {
+                    FlashbackReforged.LOGGER.warn("Could not read thumbnail {}", file, e);
+                }
+            });
         }
 
         void releaseIcon() {
             if (this.icon != null) Minecraft.getInstance().getTextureManager().release(this.icon);
             this.icon = null;
             this.iconLoaded = false;
+            this.iconGeneration++;
         }
 
         @Override

@@ -65,6 +65,9 @@ async function main() {
   const request = [`flashback_reforged.selftest=${option("--scenario", "full")}`, "flashback_reforged.selftest.world=flashback_reforged_test"];
   if (option("--preset")) request.push(`flashback_reforged.selftest.preset=${option("--preset")}`);
   if (option("--ticks")) request.push(`flashback_reforged.selftest.ticks=${option("--ticks")}`);
+  args.forEach((arg, i) => {
+    if (arg === "--request") request.push(args[i + 1]);
+  });
   const requestFile = path.join(game, "flashback_reforged-selftest.properties");
   fs.writeFileSync(requestFile, request.join("\n") + "\n");
 

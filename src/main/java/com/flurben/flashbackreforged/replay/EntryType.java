@@ -16,7 +16,13 @@ public enum EntryType {
     /** HUD-relevant state of the recording player (hotbar, health, food, xp). See {@link LocalHud}. */
     LOCAL_HUD,
     /** A block of PCM voice from Simple Voice Chat. */
-    VOICE;
+    VOICE,
+    /**
+     * A packet held in the replay's blob file, so identical ones are stored once: varlong offset, then chunk x and z as
+     * big-endian ints if the packet is a chunk. A chunk may then have an int count and a long hash, for that many entries
+     * straight after this one which bring the stored chunk up to date.
+     */
+    BLOB_REF;
 
     private static final EntryType[] VALUES = values();
 

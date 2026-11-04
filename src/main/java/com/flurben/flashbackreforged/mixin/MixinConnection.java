@@ -24,12 +24,12 @@ public abstract class MixinConnection {
     @Inject(method = "channelRead0(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/network/protocol/Packet;)V", at = @At("HEAD"))
     private void flashbackreforged$capture(ChannelHandlerContext context, Packet<?> packet, CallbackInfo ci) {
         if (getReceiving() != PacketFlow.CLIENTBOUND || !(getPacketListener() instanceof ClientPacketListener)) return;
+        long start = com.flurben.flashbackreforged.perf.Perf.start();
         if (packet instanceof ClientboundBundlePacket bundle) {
-            for (Packet<?> inner : bundle.subPackets()) Recorder.journal().observe(inner);
+            for (Packet<?> inner : bundle.subPackets()) Recorder.onIncoming(inner);
         } else {
-            Recorder.journal().observe(packet);
+            Recorder.onIncoming(packet);
         }
-        Recorder recorder = Recorder.active();
-        if (recorder != null) recorder.onPacket(packet);
+        com.flurben.flashbackreforged.perf.Perf.end("netty.recordPacket", start);
     }
 }

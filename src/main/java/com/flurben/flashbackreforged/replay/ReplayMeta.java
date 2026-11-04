@@ -18,7 +18,8 @@ import java.util.UUID;
 /** Contents of {@code meta.json}. Replays are directories, so a crashed session is still a readable replay. */
 public final class ReplayMeta {
     public static final String FILE = "meta.json";
-    public static final int FORMAT = 1;
+    /** 1 stored every packet in its segment. 2 added blob files, which a build that only knows 1 would silently skip. */
+    public static final int FORMAT = 2;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     public static final class Segment {
@@ -27,6 +28,8 @@ public final class ReplayMeta {
         public int ticks;
         /** Starts a different recording: the world is rebuilt here rather than carried over. */
         public boolean discontinuity;
+        /** The file that this segment's blob references point into. */
+        public String blobs;
 
         public Segment() {}
 
@@ -65,10 +68,18 @@ public final class ReplayMeta {
         return GSON.fromJson(Files.readString(replayDir.resolve(FILE), StandardCharsets.UTF_8), ReplayMeta.class);
     }
 
+    public void write(Path replayDir) throws IOException {
+        writeJson(replayDir, toJson());
+    }
+
+    public byte[] toJson() {
+        return GSON.toJson(this).getBytes(StandardCharsets.UTF_8);
+    }
+
     /** Written atomically: this runs periodically during recording and must survive a crash mid-write. */
-    public synchronized void write(Path replayDir) throws IOException {
+    public static void writeJson(Path replayDir, byte[] json) throws IOException {
         Path tmp = replayDir.resolve(FILE + ".tmp");
-        Files.writeString(tmp, GSON.toJson(this), StandardCharsets.UTF_8);
+        Files.write(tmp, json);
         Files.move(tmp, replayDir.resolve(FILE), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

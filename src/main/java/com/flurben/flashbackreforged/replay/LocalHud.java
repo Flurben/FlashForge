@@ -39,14 +39,17 @@ public record LocalHud(int selected, float health, int food, float saturation, i
                 b.readVarInt(), b.readFloat(), b.readVarInt(), b.readVarInt(), b.readList(FriendlyByteBuf::readItem));
     }
 
-    public boolean sameAs(LocalHud o) {
-        if (o == null || selected != o.selected || health != o.health || food != o.food || saturation != o.saturation
-                || xpLevel != o.xpLevel || xpProgress != o.xpProgress || armor != o.armor || air != o.air) {
+    /** Compares without copying anything, since copying an item is expensive and this rarely finds a change. */
+    public boolean matches(LocalPlayer p) {
+        if (selected != p.getInventory().selected || health != p.getHealth() || food != p.getFoodData().getFoodLevel()
+                || saturation != p.getFoodData().getSaturationLevel() || xpLevel != p.experienceLevel || xpProgress != p.experienceProgress
+                || armor != p.getArmorValue() || air != p.getAirSupply()) {
             return false;
         }
-        for (int i = 0; i < hotbar.size(); i++) {
-            if (!ItemStack.matches(hotbar.get(i), o.hotbar.get(i))) return false;
+        NonNullList<ItemStack> items = p.getInventory().items;
+        for (int i = 0; i < 9; i++) {
+            if (!ItemStack.matches(hotbar.get(i), items.get(i))) return false;
         }
-        return true;
+        return ItemStack.matches(hotbar.get(9), p.getOffhandItem());
     }
 }

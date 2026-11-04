@@ -96,10 +96,9 @@ final class LocalPlayerTracker {
         }
         this.lastSwingTime = player.swinging ? player.swingTime : Integer.MAX_VALUE;
 
-        LocalHud hud = LocalHud.of(player);
-        if (!hud.sameAs(this.lastHud)) {
-            this.recorder.writeHud(hud);
-            this.lastHud = hud;
+        if (this.lastHud == null || !this.lastHud.matches(player)) {
+            this.lastHud = LocalHud.of(player);
+            this.recorder.writeHud(this.lastHud);
         }
     }
 

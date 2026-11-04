@@ -13,6 +13,8 @@ public final class ReplayCombiner {
     private ReplayCombiner() {}
 
     public static Path combine(Path first, Path second) throws IOException {
+        // Either could be a recording that only just stopped.
+        com.flurben.flashbackreforged.record.Recorder.awaitWrites();
         ReplayMeta a = ReplayMeta.read(first);
         ReplayMeta b = ReplayMeta.read(second);
         if (!a.mods.equals(b.mods)) {
@@ -48,12 +50,22 @@ public final class ReplayCombiner {
     private static int append(Path from, ReplayMeta meta, Path dir, ReplayMeta out, int index) throws IOException {
         int offset = out.totalTicks;
         boolean firstOfRecording = index > 0;
+        // Each source keeps its own blob files, since what's in its segments points into them by position.
+        Map<String, String> blobFiles = new java.util.HashMap<>();
         for (ReplayMeta.Segment s : meta.segments) {
             String file = String.format("seg%04d.gz", index++);
             Files.copy(from.resolve(s.file), dir.resolve(file));
             ReplayMeta.Segment copy = new ReplayMeta.Segment(file, offset + s.startTick);
             copy.ticks = s.ticks;
             copy.discontinuity = firstOfRecording || s.discontinuity;
+            if (s.blobs != null) {
+                copy.blobs = blobFiles.get(s.blobs);
+                if (copy.blobs == null) {
+                    copy.blobs = String.format("blobs%04d.bin", index);
+                    Files.copy(from.resolve(s.blobs), dir.resolve(copy.blobs));
+                    blobFiles.put(s.blobs, copy.blobs);
+                }
+            }
             firstOfRecording = false;
             out.segments.add(copy);
         }

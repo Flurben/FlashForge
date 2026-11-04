@@ -25,6 +25,7 @@
     "accessor.ItemInHandRendererAccessor",
     "accessor.LevelRendererAccessor",
     "accessor.MinecraftAccessor",
+    "accessor.NativeImageAccessor",
     "accessor.PlayerTabOverlayAccessor",
     "accessor.TimerAccessor",
     "rng.MixinClientLevelRng",

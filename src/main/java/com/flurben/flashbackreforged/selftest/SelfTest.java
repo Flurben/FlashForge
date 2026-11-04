@@ -64,6 +64,8 @@ public final class SelfTest {
     private static final Map<String, Object> RESULT = new LinkedHashMap<>();
     private static final List<String> FAILURES = new ArrayList<>();
     private static int entitiesAtEnd;
+    private static final int PAUSE_AT_TICK = 160;
+    private static int pausedFor;
 
     private SelfTest() {}
 
@@ -89,7 +91,7 @@ public final class SelfTest {
     }
 
     private enum Step {
-        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, FAR_VIEW, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, SPECTATE_PLAY, F_SNOW, F_OVERCAST, F_COMMANDS, F_PICK, F_AUDIO, F_ASPECT, F_ASPECT_DONE, F_TIP, F_HIDE, F_RNG_START, F_RNG_A, F_RNG_B, F_RNG_DONE, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
+        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, ACROSS_PAUSE, FAR_VIEW, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, SPECTATE_PLAY, F_SNOW, F_OVERCAST, F_COMMANDS, F_PICK, F_AUDIO, F_ASPECT, F_ASPECT_DONE, F_TIP, F_HIDE, F_RNG_START, F_RNG_A, F_RNG_B, F_RNG_DONE, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
     }
 
     public static boolean enabled() {
@@ -98,6 +100,14 @@ public final class SelfTest {
 
     public static void tick() {
         if (!enabled() || step == Step.DONE) return;
+        if (SCENARIO.equals("perf")) {
+            PerfRun.tick(Minecraft.getInstance());
+            return;
+        }
+        if (SCENARIO.equals("legacy")) {
+            LegacyCheck.tick(Minecraft.getInstance());
+            return;
+        }
         try {
             run(Minecraft.getInstance());
         } catch (Throwable t) {
@@ -143,6 +153,16 @@ public final class SelfTest {
             case RECORDING -> {
                 Recorder recorder = Recorder.active();
                 if (recorder == null) throw new IllegalStateException("Recorder stopped unexpectedly");
+                // A pause in the middle: what changes during it isn't recorded, and playback must jump over the gap.
+                if (recorder.paused()) {
+                    if (++pausedFor == 1) server(mc, "setblock ~-2 ~ ~2 minecraft:diamond_block");
+                    if (pausedFor >= 40) recorder.setPaused(false);
+                    return;
+                }
+                if (recorder.tick() == PAUSE_AT_TICK && pausedFor == 0) {
+                    recorder.setPaused(true);
+                    return;
+                }
                 // Enough activity to make the replay's correctness visible in its packet stream and screenshots.
                 if (recorder.tick() % 10 == 0 && mc.player != null) mc.player.setYRot(mc.player.getYRot() + 15f);
                 if (recorder.tick() % 40 == 0 && mc.player != null) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
@@ -223,6 +243,18 @@ public final class SelfTest {
                 screenshot(mc, "seek_back");
                 RESULT.put("packetsApplied", replay.packetsApplied());
                 RESULT.put("packetFailures", replay.packetFailures());
+                // Just short of where the recording was paused, then on across it.
+                replay.seek(PAUSE_AT_TICK - 3);
+                replay.setPaused(false);
+                go(Step.ACROSS_PAUSE, 40);
+            }
+            case ACROSS_PAUSE -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                replay.setPaused(true);
+                check(replay.tick() > PAUSE_AT_TICK + 5, "did not play across the pause: tick " + replay.tick());
+                check(mc.level.getEntity(replay.recordedPlayerId()) != null, "recorded player lost across the pause");
+                check(mc.level.getChunkSource().getLoadedChunksCount() > 0, "no chunks after the pause");
+                RESULT.put("tickAcrossPause", replay.tick());
                 if (SCENARIO.equals("basic")) {
                     go(Step.FINISH, 40);
                 } else {

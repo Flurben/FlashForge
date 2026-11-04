@@ -12,21 +12,24 @@ screenshots or video frames, unless the row says otherwise. Nothing here has bee
 | Dev client (Forge only) | Self test passes, 0 packet failures |
 | TerraFirmaGreg 0.13.17 through Prism, TFC world | Self test passes, 6 packet failures (see below) |
 | TFG + Distant Horizons 3.3.3 | Self test passes; LODs visible past render distance in a replay |
-| TFG + DH + Complementary Unbound (Oculus) Self test passes; LODs and volumetric clouds render in a replay; export has normal brightness in every frame |
+| TFG + DH + Complementary Unbound (Oculus) | Self test passes; LODs and volumetric clouds render in a replay; export has normal brightness in every frame |
+| Replays from 0.1.0 and 0.1.1 opened in 0.2.0 | Play and seek correctly, in the dev client and TFG |
+| A recording cut short, as a crash would leave it | Opens and recovers. Chunks whose data was cut off are missing and logged |
+
+For 0.2.0, the profiling run also compared the replayed world with the live one, block by block, at 14 moments in a 4-minute recording. See [PERFORMANCE.md](PERFORMANCE.md).
 
 Entity types in the replay's final seconds matched the live game exactly in TFG, including TFC and TFG mobs, apart from the
 replay's own viewer entity.
 
-The remaining packet failures are one GTCEu packet (`SPacketNotifyCapeChange`) that throws a null pointer in GTCEu's own
-handler when a player has no cape. Flashback Reforged skips it and logs it. Whether it also throws in normal play wasn't checked.
+The remaining packet failures are mods' own handlers throwing null pointers. GTCEu's `SPacketNotifyCapeChange` does this when a player has no cape, and Lodestone's `ClearFireEffectInstancePacket` does when its entity is no longer around. Flashback Reforged skips and logs these. Whether they also throw in normal play wasn't checked.
 
 ## Features
 
 | Feature | State |
 | --- | --- |
-| Recording: start, stop, pause, resume, cancel, auto-record, markers, indicator | Start and stop verified; the rest implemented, not exercised by the self test |
-| 5-minute segments with snapshots | Implemented; test recordings were shorter than one segment |
-| Replay browser: open, rename, delete, combine | Open and combine verified; rename and delete not exercised |
+| Recording: start, stop, pause, resume, cancel, auto-record, markers, indicator | Start, stop, pause and resume verified, including playing across a pause; the rest implemented, not exercised by the self test |
+| 1-minute segments with snapshots | Verified across recordings of up to 11 segments, and at 3-second segments for stress |
+| Replay browser: open, rename, delete, combine | The list, thumbnails and combining itself verified; opening from the screen, rename, delete and the combine button not exercised |
 | Playback: play, pause, speed, seek both ways | Verified |
 | Combined replays crossing the join | Verified |
 | Free camera | Verified through keyframes; manual flying not exercised |
@@ -41,7 +44,7 @@ handler when a player has no cape. Flashback Reforged skips it and logs it. Whet
 | Audio source entity | Verified: sounds are heard from the chosen entity. Listening to the result wasn't checked |
 | `/hide` and `/show` | Verified by running the commands; hidden entities are outlined in red and left out of exports. Opening chat with the keyboard in a replay wasn't exercised |
 | Entity popup | Finding the entity at a point and the popup itself verified; the real right-click wasn't exercised |
-| Replay thumbnails | Verified |
+| Replay thumbnails | Verified to match a full screenshot taken at the same moment. A recording that begins by flying into loading chunks can get a flat dark picture, because that's what was on screen |
 | Replay sorting (date, name, world, length, size) | Button shown; changing the sort wasn't exercised |
 | Tips | Verified on request; showing automatically on open wasn't exercised |
 | Game view sizing: change shape, fill, behind panels | Change shape at 1:1 and behind panels verified; fill and other shapes not exercised |
@@ -81,7 +84,10 @@ Repeat exports of the same range with the same settings are not byte-identical. 
 ## Not tested
 
 - Multiplayer servers: all recordings came from singleplayer worlds.
-- Long recordings: the longest was 1200 ticks, a single segment.
+- Long recordings: the longest was 10 minutes. Recordings that run for hours haven't been tried.
+- Render distances other than 12. Snapshot and seek costs depend on the number of loaded chunks.
+- Export on AMD and Intel graphics, in particular reading mapped graphics memory from another thread.
 - Recorded rain in a TFC world: TFC's weather ignores the test's `weather rain` command, so no recorded TFC rain has been replayed. Recorded rain replays correctly in the dev client.
 - Other GPUs and operating systems.
+- Opening a 0.2.0 replay in an older version. Those versions don't know the new format and would show a world with missing chunks.
 - TFG's own shader pack `TerraFirmaGreg-Shaders-Complementary-3.1.6.zip`.

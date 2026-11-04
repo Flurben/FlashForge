@@ -612,8 +612,13 @@ public final class TimelinePanel {
     }
 
     static String formatTime(int ticks) {
-        int seconds = ticks / 20;
-        return String.format("%d:%02d.%02d", seconds / 60, seconds % 60, (ticks % 20) * 5);
+        // Drawn many times a frame, and String.format is slow enough to show up.
+        int seconds = ticks / 20, minutes = seconds / 60, rest = seconds % 60, hundredths = (ticks % 20) * 5;
+        StringBuilder out = new StringBuilder(10).append(minutes).append(':');
+        if (rest < 10) out.append('0');
+        out.append(rest).append('.');
+        if (hundredths < 10) out.append('0');
+        return out.append(hundredths).toString();
     }
 
 }

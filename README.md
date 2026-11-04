@@ -33,9 +33,12 @@ and Distant Horizons into the instance's mods folder, so both stay there afterwa
 node tools/prism-test.js --scenario full --preset tfc:overworld --shader ComplementaryUnbound_r5.9.3.zip
 ```
 
+`tools/perf.js` runs a scripted profiling session, and [docs/PERFORMANCE.md](docs/PERFORMANCE.md) has the results and how to read them.
+
 ## Design notes
 
 - Recordings are directories in `flashback_reforged/replays/`, holding gzip segments that each begin with a full state snapshot.
+- Large packets are stored once in `blobs.bin`, and segments refer to them by position, so a chunk repeated across snapshots costs one copy.
 - `registries.nbt` stores Forge's numeric registry IDs from recording time. They vary per world, and replaying with the
   wrong map turns mobs into other mobs and shifts textures.
 - `serverconfig.nbt` stores server-type mod configs, because a replay never performs the login handshake that would

@@ -66,6 +66,11 @@ public final class ClientEvents {
         @SubscribeEvent
         public static void renderTick(TickEvent.RenderTickEvent event) {
             ReplayPlayer replay = ReplayPlayer.active();
+            if (event.phase == TickEvent.Phase.START) {
+                com.flurben.flashbackreforged.perf.Perf.frame();
+                Recorder recorder = Recorder.active();
+                if (recorder != null) recorder.frame();
+            }
             if (event.phase != TickEvent.Phase.START) {
                 com.flurben.flashbackreforged.client.SpectatorHud.endFrame();
                 return;
@@ -87,7 +92,9 @@ public final class ClientEvents {
             replay.camera().setInputEnabled(!com.flurben.flashbackreforged.export.ExportManager.isExporting()
                     && (com.flurben.flashbackreforged.client.ui.EditorUi.get().flying() || com.flurben.flashbackreforged.client.ui.EditorUi.get().hidden()));
             // An export has already set this frame's scene state from its own clock.
+            long applyStart = com.flurben.flashbackreforged.perf.Perf.start();
             if (!com.flurben.flashbackreforged.export.ExportManager.isExporting()) replay.editor().applyFrame(replay.tick() + mc.getFrameTime());
+            com.flurben.flashbackreforged.perf.Perf.end("frame.applyFrame", applyStart);
             replay.camera().frame();
         }
 
@@ -134,11 +141,11 @@ public final class ClientEvents {
         markerKey(mc, ADD_MARKER_4, 0xFFDD33);
         Recorder recorder = Recorder.active();
         if (recorder != null && mc.level != null) {
-            String dimension = mc.level.dimension().location().toString();
-            if (lastDimension != null && !lastDimension.equals(dimension)) {
+            var dimension = mc.level.dimension();
+            if (lastDimension != null && lastDimension != dimension) {
                 var marker = new com.flurben.flashbackreforged.replay.ReplayMeta.Marker();
                 marker.color = 0xAA55FF;
-                marker.description = dimension;
+                marker.description = dimension.location().toString();
                 recorder.addMarker(marker);
             }
             lastDimension = dimension;
@@ -147,7 +154,7 @@ public final class ClientEvents {
         }
     }
 
-    private static String lastDimension;
+    private static net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> lastDimension;
 
     private static void markerKey(Minecraft mc, KeyMapping key, int color) {
         while (key.consumeClick()) {

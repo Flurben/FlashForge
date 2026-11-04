@@ -3,26 +3,40 @@ package com.flurben.flashbackreforged.export;
 import com.flurben.flashbackreforged.FlashbackReforged;
 import com.mojang.blaze3d.platform.NativeImage;
 
+import com.flurben.flashbackreforged.mixin.accessor.NativeImageAccessor;
+import org.lwjgl.system.MemoryUtil;
+
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Receives raw RGBA frames (bottom row first, as OpenGL reads them) and writes them on a background thread. The queue is
- * small and blocking, so a slow encoder slows the render instead of filling memory.
+ * Receives raw RGBA frames (bottom row first, as OpenGL reads them) straight from mapped graphics memory, and copies and
+ * writes them on a background thread. How many can be waiting is limited by {@link FrameCapture}'s buffers, so a slow
+ * encoder slows the render instead of filling memory. PNGs are compressed on several threads at once, since they're written
+ * to separate files and take far longer than rendering does.
  */
 final class FrameWriter {
-    private static final byte[] END = new byte[0];
+    private static final Frame END = new Frame(null, null);
+    private static final int PNG_THREADS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() - 2));
 
-    private final BlockingQueue<byte[]> queue = new ArrayBlockingQueue<>(6);
+    /** @param done says the pixels have been copied and the memory can go back to the graphics card. */
+    private record Frame(ByteBuffer pixels, Runnable done) {}
+
+    private final BlockingQueue<Frame> queue = new LinkedBlockingQueue<>();
     private final ExportSettings settings;
     private final int renderWidth;
     private final int renderHeight;
@@ -96,17 +110,20 @@ final class FrameWriter {
         }
     }
 
-    /** Blocks if the writer has fallen behind. */
-    void submit(byte[] frame) throws InterruptedException {
-        this.queue.put(frame);
+    /** Render thread. The pixels must stay readable until {@code done} runs, which it always does unless this is aborted. */
+    void submit(ByteBuffer pixels, Runnable done) {
+        this.queue.add(new Frame(pixels, done));
     }
 
     private void runEncoder() {
+        byte[] copy = new byte[this.renderWidth * this.renderHeight * 4];
         try (OutputStream out = new BufferedOutputStream(this.process.getOutputStream(), 1 << 20)) {
             while (true) {
-                byte[] frame = this.queue.take();
+                Frame frame = this.queue.take();
                 if (frame == END) break;
-                out.write(frame);
+                frame.pixels.get(0, copy);
+                frame.done.run();
+                out.write(copy);
                 this.written++;
             }
         } catch (IOException e) {
@@ -119,45 +136,70 @@ final class FrameWriter {
     }
 
     private void runPng() {
+        ExecutorService pool = Executors.newFixedThreadPool(PNG_THREADS, r -> {
+            Thread thread = new Thread(r, "Flashback Reforged PNG Compressor");
+            thread.setDaemon(true);
+            return thread;
+        });
+        // A little more than there are threads, so one is always ready, and no more, because each is a whole frame in memory.
+        Semaphore room = new Semaphore(PNG_THREADS + 2);
         try {
             while (true) {
-                byte[] frame = this.queue.take();
+                Frame frame = this.queue.take();
                 if (frame == END) break;
                 Path file = this.settings.screenshot ? this.settings.output : this.settings.output.resolve(String.format("frame_%06d.png", this.written));
-                writePng(frame, file);
+                room.acquire();
+                NativeImage image = copyToImage(frame.pixels);
+                frame.done.run();
                 this.written++;
+                pool.execute(() -> {
+                    try (image) {
+                        if (!this.settings.transparent) makeOpaque(image);
+                        image.writeToFile(file);
+                    } catch (IOException e) {
+                        this.error = "Could not write image: " + e.getMessage();
+                        FlashbackReforged.LOGGER.error(this.error);
+                    } finally {
+                        room.release();
+                    }
+                });
             }
-        } catch (IOException e) {
-            this.error = "Could not write image: " + e.getMessage();
-            FlashbackReforged.LOGGER.error(this.error);
-            drainQueueUntilEnd();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    private void writePng(byte[] frame, Path file) throws IOException {
-        int w = this.renderWidth, h = this.renderHeight;
-        try (NativeImage image = new NativeImage(NativeImage.Format.RGBA, w, h, false)) {
-            int stride = w * 4;
-            for (int y = 0; y < h; y++) {
-                int row = (h - 1 - y) * stride;
-                for (int x = 0; x < w; x++) {
-                    int i = row + x * 4;
-                    // The game leaves meaningless alpha in its framebuffer unless the background was removed on purpose.
-                    int r = frame[i] & 0xFF, g = frame[i + 1] & 0xFF, b = frame[i + 2] & 0xFF, a = this.settings.transparent ? frame[i + 3] & 0xFF : 0xFF;
-                    image.setPixelRGBA(x, y, (a << 24) | (b << 16) | (g << 8) | r);
-                }
+        } finally {
+            pool.shutdown();
+            try {
+                pool.awaitTermination(5, TimeUnit.MINUTES);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-            image.writeToFile(file);
         }
     }
 
-    /** After a failure, keep consuming so the render thread can't block forever on a full queue. */
+    /** Also turns the picture the right way up: OpenGL's first row is the bottom one. */
+    private NativeImage copyToImage(ByteBuffer pixels) {
+        int w = this.renderWidth, h = this.renderHeight, stride = w * 4;
+        NativeImage image = new NativeImage(NativeImage.Format.RGBA, w, h, false);
+        long to = ((NativeImageAccessor) (Object) image).flashbackreforged$pixels();
+        long from = MemoryUtil.memAddress(pixels);
+        for (int y = 0; y < h; y++) MemoryUtil.memCopy(from + (long) (h - 1 - y) * stride, to + (long) y * stride, stride);
+        return image;
+    }
+
+    /** The game leaves meaningless alpha in its framebuffer unless the background was removed on purpose. */
+    private void makeOpaque(NativeImage image) {
+        long address = ((NativeImageAccessor) (Object) image).flashbackreforged$pixels();
+        long end = address + (long) this.renderWidth * this.renderHeight * 4;
+        for (long at = address + 3; at < end; at += 4) MemoryUtil.memPutByte(at, (byte) 0xFF);
+    }
+
+    /** After a failure, keep consuming, so that frames being waited on still count as done. */
     private void drainQueueUntilEnd() {
         try {
-            while (this.queue.take() != END) {
-                Thread.onSpinWait();
+            while (true) {
+                Frame frame = this.queue.take();
+                if (frame == END) return;
+                frame.done.run();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -180,7 +222,7 @@ final class FrameWriter {
 
     /** Waits for everything to be written and the encoder to finish. */
     void finish() throws InterruptedException {
-        this.queue.put(END);
+        this.queue.add(END);
         this.thread.join();
         if (this.process != null) {
             int exit = this.process.waitFor();
@@ -188,9 +230,16 @@ final class FrameWriter {
         }
     }
 
-    void abort() {
+    /** @return whether the writer has really stopped, so that nothing is reading from mapped memory any more. */
+    boolean abort() {
         this.queue.clear();
-        this.queue.offer(END);
+        this.queue.add(END);
         if (this.process != null) this.process.destroy();
+        try {
+            this.thread.join(5000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return !this.thread.isAlive();
     }
 }
