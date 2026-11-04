@@ -1,5 +1,6 @@
 package com.flurben.flashforge.playback;
 
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
 import com.flurben.flashforge.FlashForge;
 import com.flurben.flashforge.compat.DistantHorizonsCompat;
 import com.flurben.flashforge.editor.EditorState;
@@ -347,9 +348,28 @@ public final class ReplayPlayer {
         this.fastForwarding = true;
         try {
             while (this.segment.next() && this.segment.type != EntryType.SNAPSHOT_END) applyEntry();
+            retryDeferredPayloads();
         } finally {
             this.inSnapshot = false;
             this.fastForwarding = false;
+        }
+    }
+
+    /**
+     * A snapshot carries mod payloads before the world, because mods need their state before chunks arrive. Some of them
+     * refer to a player or entity, so one that fails gets another try once the whole snapshot is in place.
+     */
+    @SuppressWarnings("unchecked")
+    private void retryDeferredPayloads() {
+        List<byte[]> payloads = new ArrayList<>(this.deferredPayloads);
+        this.deferredPayloads.clear();
+        for (byte[] bytes : payloads) {
+            try {
+                ((Packet<ClientGamePacketListener>) (Packet<?>) PacketCodec.decode(new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes)))).handle(this.listener);
+                this.packetsApplied++;
+            } catch (Throwable t) {
+                noteFailure("ClientboundCustomPayloadPacket", t);
+            }
         }
     }
 
@@ -549,6 +569,7 @@ public final class ReplayPlayer {
     }
 
     private boolean tagsApplied;
+    private final List<byte[]> deferredPayloads = new ArrayList<>();
 
     @SuppressWarnings("unchecked")
     private void guardedHandle(Packet<?> packet) {
@@ -556,7 +577,12 @@ public final class ReplayPlayer {
             ((Packet<ClientGamePacketListener>) packet).handle(this.listener);
             this.packetsApplied++;
         } catch (Throwable t) {
-            noteFailure(packet.getClass().getSimpleName(), t);
+            if (this.inSnapshot && packet instanceof ClientboundCustomPayloadPacket) {
+                int offset = this.segment.payloadOffset;
+                this.deferredPayloads.add(java.util.Arrays.copyOfRange(this.segment.data(), offset, offset + this.segment.payloadLength));
+            } else {
+                noteFailure(packet.getClass().getSimpleName(), t);
+            }
         }
     }
 

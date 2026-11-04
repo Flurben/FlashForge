@@ -1,6 +1,7 @@
 package com.flurben.flashforge.client;
 
 import com.flurben.flashforge.editor.Visuals;
+import com.flurben.flashforge.mixin.accessor.ItemInHandRendererAccessor;
 import com.flurben.flashforge.playback.ReplayPlayer;
 import com.flurben.flashforge.replay.LocalHud;
 import com.mojang.authlib.GameProfile;
@@ -70,6 +71,18 @@ public final class SpectatorHud {
         viewer.swingingArm = player.swingingArm;
         viewer.attackAnim = player.attackAnim;
         viewer.oAttackAnim = player.oAttackAnim;
+        // The hand rises on game ticks, which don't run while paused; it would stay below the screen.
+        if (replay.worldStopped()) raiseHand(mc, viewer);
+    }
+
+    private static void raiseHand(Minecraft mc, LocalPlayer viewer) {
+        ItemInHandRendererAccessor hands = (ItemInHandRendererAccessor) mc.getEntityRenderDispatcher().getItemInHandRenderer();
+        hands.flashforge$setMainHandItem(viewer.getMainHandItem());
+        hands.flashforge$setOffHandItem(viewer.getOffhandItem());
+        hands.flashforge$setMainHandHeight(1f);
+        hands.flashforge$setOMainHandHeight(1f);
+        hands.flashforge$setOffHandHeight(1f);
+        hands.flashforge$setOOffHandHeight(1f);
     }
 
     private static void apply(LocalHud hud, Inventory inventory) {

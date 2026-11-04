@@ -2,10 +2,10 @@
 // Runs the in-game self test through a Prism Launcher instance holding a real modpack.
 //
 //   node tools/prism-test.js [--instance <name>] [--scenario full] [--preset tfc:overworld] [--ticks 200]
-//                            [--no-dh] [--shader <shader pack zip>] [--java <javaw path>]
+//                            [--no-dh] [--shader <shader pack zip>]
 //
-// The built mod (and Distant Horizons, unless --no-dh) stay in the instance's mods folder. Test-only JVM arguments and
-// shader settings are restored afterwards, so the instance plays normally between runs.
+// The built mod (and Distant Horizons, unless --no-dh) stay in the instance's mods folder. The test request is used up
+// by the launch and shader settings are restored afterwards, so the instance plays normally between runs.
 const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
@@ -24,7 +24,6 @@ const option = (name, fallback) => {
 const instanceName = option("--instance", "TerraFirmaGreg-Modern 0.13.17");
 const instance = path.join(DATA, "instances", instanceName);
 const game = path.join(instance, ".minecraft");
-const java = option("--java", path.join(DATA, "java/eclipse_temurin_jre17.0.20+8/bin/javaw.exe")).replace(/\\/g, "/");
 
 function setCfg(text, values) {
   const lines = text.split(/\r?\n/);
@@ -58,18 +57,15 @@ async function main() {
     fs.writeFileSync(dhFile, Buffer.from(await (await fetch(DH_URL)).arrayBuffer()));
   }
 
-  // Applied for this run only.
-  const cfgPath = path.join(instance, "instance.cfg");
-  const cfgBefore = fs.readFileSync(cfgPath, "utf8");
-  const jvm = [`-Dflashforge.selftest=${option("--scenario", "full")}`, "-Dflashforge.selftest.world=flashforge_test"];
-  if (option("--preset")) jvm.push(`-Dflashforge.selftest.preset=${option("--preset")}`);
-  if (option("--ticks")) jvm.push(`-Dflashforge.selftest.ticks=${option("--ticks")}`);
-  fs.writeFileSync(cfgPath, setCfg(cfgBefore, {
-    OverrideJavaArgs: "true", JvmArgs: jvm.join(" "),
-    OverrideJavaLocation: "true", AutomaticJava: "false", JavaPath: java, IgnoreJavaCompatibility: "true",
-    OverrideMemory: "true", MaxMemAlloc: "10240", MinMemAlloc: "2048",
-    OverrideConsole: "true", ShowConsole: "false", ShowConsoleOnError: "false", AutoCloseConsole: "true",
-  }));
+  // The mod reads and removes this file. Instance settings can't carry it: an open Prism keeps them cached.
+  const request = [`flashforge.selftest=${option("--scenario", "full")}`, "flashforge.selftest.world=flashforge_test"];
+  if (option("--preset")) request.push(`flashforge.selftest.preset=${option("--preset")}`);
+  if (option("--ticks")) request.push(`flashforge.selftest.ticks=${option("--ticks")}`);
+  const requestFile = path.join(game, "flashforge-selftest.properties");
+  fs.writeFileSync(requestFile, request.join("\n") + "\n");
+
+  // A fresh world each run: a run that crashed can leave a half generated one behind.
+  fs.rmSync(path.join(game, "saves/flashforge_test"), { recursive: true, force: true });
 
   const irisPath = path.join(game, "config/oculus.properties");
   const irisBefore = fs.existsSync(irisPath) ? fs.readFileSync(irisPath, "utf8") : null;
@@ -86,7 +82,7 @@ async function main() {
   spawn(PRISM, ["--launch", instanceName, "--offline", "FlashForgeTest"], { detached: true, stdio: "ignore" }).unref();
 
   // The instance's folder name appears in the game's command line, which is how its process is recognised.
-  const needle = path.join("instances", instanceName);
+  const needle = instanceName;
   let seen = false;
   let outcome = "timed out";
   while (Date.now() - started < TIME_LIMIT) {
@@ -103,7 +99,7 @@ async function main() {
     }
   }
 
-  fs.writeFileSync(cfgPath, cfgBefore);
+  fs.rmSync(requestFile, { force: true });
   if (irisBefore === null) fs.rmSync(irisPath, { force: true });
   else fs.writeFileSync(irisPath, irisBefore);
   if (!wasRunning) spawnSync("taskkill", ["/IM", "prismlauncher.exe"]);

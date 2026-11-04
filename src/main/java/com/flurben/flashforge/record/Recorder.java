@@ -97,6 +97,8 @@ public final class Recorder {
         com.flurben.flashforge.replay.ServerConfigStore.save(dir);
         r.beginSegment();
         active = r;
+        // Apply packets the netty thread has already handed over, or they'd be in neither the snapshot nor the stream.
+        ((com.flurben.flashforge.mixin.accessor.BlockableEventLoopInvoker) (Object) mc).flashforge$runAllTasks();
         r.finishSnapshot();
         FlashForge.LOGGER.info("Recording started: {}", dir);
         return r;

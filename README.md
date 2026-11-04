@@ -26,6 +26,13 @@ The mod jar is written to `build/libs/flashforge-<version>.jar`.
 open the replay, play, and seek both ways. Results go to `run/flashforge-selftest.json`, with screenshots in
 `run/flashforge-selftest/`.
 
+`tools/prism-test.js` runs the same test inside a Prism Launcher instance holding a real modpack. It copies the built jar
+and Distant Horizons into the instance's mods folder, so both stay there afterwards.
+
+```bash
+node tools/prism-test.js --scenario full --preset tfc:overworld --shader ComplementaryUnbound_r5.9.3.zip
+```
+
 ## Design notes
 
 - Recordings are directories in `flashforge/replays/`, holding gzip segments that each begin with a full state snapshot.

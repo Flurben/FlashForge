@@ -102,10 +102,29 @@ public final class ExportManager {
         }
     }
 
+    private static long lastShaderClock;
+    private static long shaderClockOffset;
+    private static boolean clockInExport;
+
     /** The time shader packs should see: real time, except during an export, where it follows video frames. */
     public static long shaderClock(long realNanos) {
         Job current = job;
-        return current == null ? realNanos : current.clockFrames * 1_000_000_000L / current.settings.fps;
+        long value;
+        if (current != null) {
+            // Must carry on from the last value: shaders feed the difference into exposure and temporal buffers, and one
+            // large negative frame time leaves them black for the rest of the export.
+            if (current.clockBase < 0) current.clockBase = lastShaderClock;
+            value = current.clockBase + current.clockFrames * 1_000_000_000L / current.settings.fps;
+            clockInExport = true;
+        } else {
+            if (clockInExport) {
+                clockInExport = false;
+                shaderClockOffset = lastShaderClock + 16_666_666L - realNanos;
+            }
+            value = realNanos + shaderClockOffset;
+        }
+        lastShaderClock = value;
+        return value;
     }
 
     /** True while an export is rendering with no sky behind the world. */
@@ -133,6 +152,7 @@ public final class ExportManager {
         final FrameWriter writer;
         final AudioCapture audio;
         FrameCapture capture;
+        long clockBase = -1;
         final int totalFrames;
 
         /** Timeline position of the next frame to render. */

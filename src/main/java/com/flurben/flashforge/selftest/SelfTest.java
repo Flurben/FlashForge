@@ -45,6 +45,10 @@ import java.util.Map;
  * {@code flashforge-selftest.json} with screenshots, so behaviour can be checked without a human at the keyboard.
  */
 public final class SelfTest {
+    static {
+        loadRequestFile();
+    }
+
     private static final String SCENARIO = System.getProperty("flashforge.selftest", "");
     private static final String WORLD = System.getProperty("flashforge.selftest.world", "flashforge_selftest");
     private static final int RECORD_TICKS = Integer.getInteger("flashforge.selftest.ticks", 200);
@@ -63,8 +67,29 @@ public final class SelfTest {
 
     private SelfTest() {}
 
+    /**
+     * A launcher that is already open won't pick up new JVM arguments, so a test can also be requested with a properties
+     * file in the game directory. It is removed on reading, so only the next launch runs the test.
+     */
+    private static void loadRequestFile() {
+        Path file = net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get().resolve("flashforge-selftest.properties");
+        if (!java.nio.file.Files.exists(file)) return;
+        try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {
+            java.util.Properties request = new java.util.Properties();
+            request.load(reader);
+            request.stringPropertyNames().forEach(key -> System.setProperty(key, request.getProperty(key)));
+        } catch (java.io.IOException e) {
+            FlashForge.LOGGER.error("Could not read {}", file, e);
+        }
+        try {
+            java.nio.file.Files.delete(file);
+        } catch (java.io.IOException e) {
+            FlashForge.LOGGER.error("Could not remove {}", file, e);
+        }
+    }
+
     private enum Step {
-        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
+        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, FAR_VIEW, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, SPECTATE_PLAY, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
     }
 
     public static boolean enabled() {
@@ -121,6 +146,7 @@ public final class SelfTest {
                     replayDir = recorder.stop();
                     RESULT.put("recordedTicks", recorder.tick());
                     RESULT.put("liveEntities", entitiesAtEnd);
+                    RESULT.put("liveTypes", entityTypes(mc));
                     go(Step.LEAVE, 5);
                 }
             }
@@ -164,6 +190,9 @@ public final class SelfTest {
                 ReplayPlayer replay = ReplayPlayer.active();
                 check(replay.tick() == replay.totalTicks() - 5, "forward seek landed on " + replay.tick());
                 RESULT.put("rainAtEnd", mc.level.isRaining());
+                RESULT.put("replayEntitiesAtEnd", count(mc));
+                RESULT.put("replayTypesAtEnd", entityTypes(mc));
+                check(entityTypes(mc).containsKey("minecraft:armor_stand"), "entity summoned as recording began is missing from the replay");
                 placeCamera(mc, replay);
                 screenshot(mc, "seek_forward");
                 replay.seek(10);
@@ -185,8 +214,15 @@ public final class SelfTest {
                     go(Step.FINISH, 40);
                 } else {
                     mc.getWindow().setWindowed(1600, 900);
-                    go(Step.EDITOR, 40);
+                    // High above the world, whatever lies past the render distance is Distant Horizons' LODs or nothing.
+                    Entity target = mc.level.getEntity(replay.recordedPlayerId());
+                    replay.camera().teleport(target.getX(), target.getY() + 150, target.getZ(), 0f, 20f);
+                    go(Step.FAR_VIEW, 200);
                 }
+            }
+            case FAR_VIEW -> {
+                screenshot(mc, "far_view");
+                go(Step.EDITOR, 40);
             }
             case EDITOR -> {
                 ReplayPlayer replay = ReplayPlayer.active();
@@ -271,6 +307,13 @@ public final class SelfTest {
             }
             case SPECTATE -> {
                 EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/spectate_hud.png"));
+                ReplayPlayer.active().seek(20);
+                ReplayPlayer.active().setPaused(false);
+                go(Step.SPECTATE_PLAY, 40);
+            }
+            case SPECTATE_PLAY -> {
+                EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/spectate_playing.png"));
+                ReplayPlayer.active().setPaused(true);
                 go(Step.COMBINE, 10);
             }
             case COMBINE -> {
@@ -331,6 +374,12 @@ public final class SelfTest {
         if (target != null) {
             replay.camera().teleport(target.getX() + 4, target.getY() + 3, target.getZ() + 4, 135f, 25f);
         }
+    }
+
+    private static Map<String, Integer> entityTypes(Minecraft mc) {
+        Map<String, Integer> types = new java.util.TreeMap<>();
+        for (Entity entity : mc.level.entitiesForRendering()) types.merge(net.minecraft.world.entity.EntityType.getKey(entity.getType()).toString(), 1, Integer::sum);
+        return types;
     }
 
     private static int count(Minecraft mc) {

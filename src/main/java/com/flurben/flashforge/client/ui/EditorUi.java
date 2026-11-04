@@ -126,6 +126,7 @@ public final class EditorUi {
         ReplayPlayer replay = ReplayPlayer.active();
         SavedGlState saved = SavedGlState.capture();
         try {
+            ImGui.getIO().setFontGlobalScale(com.flurben.flashforge.client.FlashForgeConfig.UI_SCALE.get().floatValue());
             this.gl3.newFrame();
             this.glfw.newFrame();
             ImGui.newFrame();
