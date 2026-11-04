@@ -61,7 +61,15 @@ public final class ClientEvents {
         public static void renderTick(TickEvent.RenderTickEvent event) {
             if (event.phase != TickEvent.Phase.START) return;
             ReplayPlayer replay = ReplayPlayer.active();
-            if (replay != null) replay.camera().frame();
+            if (replay == null) return;
+            // The HUD setting travels with the replay and is put back when it closes.
+            Minecraft mc = Minecraft.getInstance();
+            mc.options.hideGui = !replay.editor().visuals().showHud;
+            replay.camera().setInputEnabled(!com.flurben.flashforge.export.ExportManager.isExporting()
+                    && (com.flurben.flashforge.client.ui.EditorUi.get().flying() || com.flurben.flashforge.client.ui.EditorUi.get().hidden()));
+            // An export has already set this frame's scene state from its own clock.
+            if (!com.flurben.flashforge.export.ExportManager.isExporting()) replay.editor().applyFrame(replay.tick() + mc.getFrameTime());
+            replay.camera().frame();
         }
 
         @SubscribeEvent

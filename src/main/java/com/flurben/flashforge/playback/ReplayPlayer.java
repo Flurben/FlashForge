@@ -196,7 +196,17 @@ public final class ReplayPlayer {
 
     /** Whether the game's world simulation should stand still right now. */
     public boolean worldStopped() {
-        return this.paused || this.worldFrozen;
+        // An export keeps the replay paused so nothing else advances it, but its frames still need the world running.
+        return (this.paused && !com.flurben.flashforge.export.ExportManager.isExporting()) || this.worldFrozen;
+    }
+
+    /** For callers already at the top of a frame, where changing the world is safe. */
+    public void runPendingSeek() {
+        if (this.pendingSeek >= 0) {
+            int target = this.pendingSeek;
+            this.pendingSeek = -1;
+            performSeek(target);
+        }
     }
 
     public void setPaused(boolean paused) {
@@ -251,16 +261,14 @@ public final class ReplayPlayer {
      * at the top of a frame, which is also where packets from a real server get handled.
      */
     public void clientTick() {
+        // During an export the export clock moves the recording, one video frame at a time.
+        if (com.flurben.flashforge.export.ExportManager.isExporting()) return;
         this.mc.tell(this::pump);
     }
 
     private void pump() {
         if (active != this) return;
-        if (this.pendingSeek >= 0) {
-            int target = this.pendingSeek;
-            this.pendingSeek = -1;
-            performSeek(target);
-        }
+        runPendingSeek();
         if (this.paused) return;
         step();
     }

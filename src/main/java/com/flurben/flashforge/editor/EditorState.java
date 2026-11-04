@@ -142,6 +142,7 @@ public final class EditorState {
     }
 
     private int lastBlockTick = -1;
+    private double lastDrivenTick = Double.NaN;
 
     /** Applied per rendered frame, so camera moves are smooth regardless of tick rate. */
     public void applyFrame(double tick) {
@@ -172,7 +173,10 @@ public final class EditorState {
             this.lastBlockTick = whole;
         }
 
-        if (!this.keyframesDriveCamera) return;
+        // While paused the path only takes over when the playhead moves, leaving the camera free to line up a keyframe.
+        boolean sameFrame = this.player.paused() && tick == this.lastDrivenTick;
+        this.lastDrivenTick = tick;
+        if (!this.keyframesDriveCamera || sameFrame) return;
         boolean moved = false;
         double x = camera.x(), y = camera.y(), z = camera.z();
         float yaw = mc.player.getYRot(), pitch = mc.player.getXRot(), roll = camera.roll();

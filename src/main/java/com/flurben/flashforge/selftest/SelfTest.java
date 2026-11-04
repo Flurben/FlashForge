@@ -1,6 +1,16 @@
 package com.flurben.flashforge.selftest;
 
 import com.flurben.flashforge.FlashForge;
+import com.flurben.flashforge.client.ui.EditorUi;
+import com.flurben.flashforge.editor.EditorState;
+import com.flurben.flashforge.editor.Interpolation;
+import com.flurben.flashforge.editor.Keyframe;
+import com.flurben.flashforge.editor.KeyframeTrack;
+import com.flurben.flashforge.editor.Scene;
+import com.flurben.flashforge.editor.TrackType;
+import com.flurben.flashforge.export.ExportManager;
+import com.flurben.flashforge.export.ExportSettings;
+import com.flurben.flashforge.replay.ReplayStorage;
 import com.flurben.flashforge.playback.ReplayPlayer;
 import com.flurben.flashforge.record.Recorder;
 import com.flurben.flashforge.replay.ReplayMeta;
@@ -49,7 +59,7 @@ public final class SelfTest {
     private SelfTest() {}
 
     private enum Step {
-        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, FINISH, DONE
+        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, FINISH, DONE
     }
 
     public static boolean enabled() {
@@ -166,7 +176,88 @@ public final class SelfTest {
                 screenshot(mc, "seek_back");
                 RESULT.put("packetsApplied", replay.packetsApplied());
                 RESULT.put("packetFailures", replay.packetFailures());
-                go(Step.FINISH, 40);
+                if (SCENARIO.equals("basic")) {
+                    go(Step.FINISH, 40);
+                } else {
+                    mc.getWindow().setWindowed(1600, 900);
+                    go(Step.EDITOR, 40);
+                }
+            }
+            case EDITOR -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                EditorState editor = replay.editor();
+                Entity target = mc.level.getEntity(replay.recordedPlayerId());
+                double px = target.getX(), py = target.getY(), pz = target.getZ();
+                editor.checkpoint();
+                Scene scene = editor.scene();
+                KeyframeTrack camera = scene.trackForAdding(TrackType.CAMERA);
+                camera.keyframes.put(20, new Keyframe(new double[]{px + 8, py + 4, pz + 8, 135, 20, 0}, Interpolation.SMOOTH));
+                camera.keyframes.put(120, new Keyframe(new double[]{px - 8, py + 2, pz + 8, 225, 10, 0}, Interpolation.SMOOTH));
+                scene.inTick = 20;
+                scene.outTick = 120;
+                replay.seek(70);
+                EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/editor.png"));
+                go(Step.VISUALS, 40);
+            }
+            case VISUALS -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                EditorState editor = replay.editor();
+                check(editor.canUndo(), "editor change left nothing to undo");
+                // Keyframes should have moved the camera to the path's midpoint when the playhead moved.
+                Entity target = mc.level.getEntity(replay.recordedPlayerId());
+                RESULT.put("cameraAtMidpoint", replay.camera().x() + "," + replay.camera().y() + "," + replay.camera().z());
+                check(target != null && Math.abs(replay.camera().x() - target.getX()) < 2, "keyframes did not drive the camera");
+                editor.visuals().renderEntities = false;
+                editor.visuals().renderPlayers = false;
+                EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/no_entities.png"));
+                go(Step.EXPORT_VIDEO, 20);
+            }
+            case EXPORT_VIDEO -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                replay.editor().visuals().renderEntities = true;
+                replay.editor().visuals().renderPlayers = true;
+                ExportSettings video = new ExportSettings();
+                video.name = "selftest";
+                video.width = 1280;
+                video.height = 720;
+                video.fps = 30;
+                video.startTick = 20;
+                video.endTick = 120;
+                video.bitrateKbps = 8000;
+                video.warmupFrames = 10;
+                video.output = ReplayStorage.exports().resolve("selftest.mp4");
+                Files.deleteIfExists(video.output);
+                ExportManager.enqueue(video);
+                go(Step.WAIT_VIDEO, 5);
+            }
+            case WAIT_VIDEO -> {
+                if (ExportManager.isExporting() || !ExportManager.queue().isEmpty()) return;
+                Path file = ReplayStorage.exports().resolve("selftest.mp4");
+                RESULT.put("exportError", ExportManager.lastError());
+                check(Files.exists(file) && Files.size(file) > 10_000, "exported video missing or empty: " + ExportManager.lastError());
+                RESULT.put("exportBytes", Files.exists(file) ? Files.size(file) : 0);
+                ExportSettings shot = new ExportSettings();
+                shot.name = "selftest";
+                shot.width = 2560;
+                shot.height = 1440;
+                shot.screenshot = true;
+                shot.format = ExportSettings.Format.PNG_SEQUENCE;
+                shot.audio = false;
+                shot.startTick = ReplayPlayer.active().tick();
+                shot.endTick = shot.startTick + 1;
+                shot.warmupFrames = 10;
+                shot.output = ReplayStorage.exports().resolve("selftest.png");
+                Files.deleteIfExists(shot.output);
+                ExportManager.enqueue(shot);
+                go(Step.WAIT_SCREENSHOT, 5);
+            }
+            case WAIT_SCREENSHOT -> {
+                if (ExportManager.isExporting() || !ExportManager.queue().isEmpty()) return;
+                Path file = ReplayStorage.exports().resolve("selftest.png");
+                check(Files.exists(file) && Files.size(file) > 10_000, "exported screenshot missing or empty: " + ExportManager.lastError());
+                RESULT.put("packetsApplied", ReplayPlayer.active().packetsApplied());
+                RESULT.put("packetFailures", ReplayPlayer.active().packetFailures());
+                go(Step.FINISH, 20);
             }
             case FINISH -> finish(mc);
             default -> {

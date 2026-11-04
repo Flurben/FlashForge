@@ -8,14 +8,28 @@
   "client": [
     "MixinClientLevel",
     "MixinConnection",
+    "MixinKeyboardHandler",
+    "MixinLibrary",
     "MixinLivingEntity",
     "MixinLocalPlayer",
     "MixinMinecraft",
+    "MixinMinecraftHooks",
+    "MixinMouseHandler",
+    "MixinRenderTarget",
+    "MixinTimer",
+    "MixinWindow",
     "accessor.BlockableEventLoopInvoker",
     "accessor.BossHealthOverlayAccessor",
     "accessor.MinecraftAccessor",
     "accessor.PlayerTabOverlayAccessor",
-    "accessor.TimerAccessor"
+    "accessor.TimerAccessor",
+    "visual.MixinBeaconRenderer",
+    "visual.MixinEntityRenderDispatcher",
+    "visual.MixinLevelRenderer",
+    "visual.MixinLightTexture",
+    "visual.MixinParticleEngine"
   ],
-  "injectors": { "defaultRequire": 1 }
+  "injectors": {
+    "defaultRequire": 1
+  }
 }
