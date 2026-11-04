@@ -227,8 +227,11 @@ public final class Recorder {
         this.tick++;
         this.meta.totalTicks = this.tick;
 
-        // A few seconds in, once the world has loaded around the player.
-        if (this.tick == THUMBNAIL_TICK) saveThumbnail();
+        // No HUD means no chance to catch the frame before the HUD draws, but also nothing to keep out of the picture.
+        if (this.tick >= THUMBNAIL_FALLBACK_TICK && this.nextThumbnailTick == THUMBNAIL_TICK && mc.screen == null) {
+            this.nextThumbnailTick = Integer.MAX_VALUE;
+            saveThumbnail();
+        }
 
         if (this.segment.ticks >= SEGMENT_TICKS) {
             rollSegment();
@@ -239,7 +242,10 @@ public final class Recorder {
         }
     }
 
+    private static final int THUMBNAIL_EARLY_TICK = 20;
     private static final int THUMBNAIL_TICK = 100;
+    private static final int THUMBNAIL_FALLBACK_TICK = 140;
+    private int nextThumbnailTick = THUMBNAIL_EARLY_TICK;
     private boolean thumbnailSaved;
 
     private void rollSegment() {
@@ -331,6 +337,16 @@ public final class Recorder {
         } catch (IOException e) {
             FlashbackReforged.LOGGER.warn("Could not remove cancelled recording {}", folder, e);
         }
+    }
+
+    /**
+     * Render thread, once the world is drawn and before the HUD and any open screen are. An early picture covers short
+     * recordings, then a later one replaces it once the world has loaded around the player.
+     */
+    public void beforeGui() {
+        if (this.paused || this.tick < this.nextThumbnailTick) return;
+        this.nextThumbnailTick = this.nextThumbnailTick == THUMBNAIL_EARLY_TICK ? THUMBNAIL_TICK : Integer.MAX_VALUE;
+        saveThumbnail();
     }
 
     private void saveThumbnail() {

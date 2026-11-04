@@ -147,6 +147,9 @@ public final class SelfTest {
                 if (recorder.tick() % 10 == 0 && mc.player != null) mc.player.setYRot(mc.player.getYRot() + 15f);
                 if (recorder.tick() % 40 == 0 && mc.player != null) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
                 if (recorder.tick() == RECORD_TICKS / 2) server(mc, "weather rain");
+                // Open across the moment the thumbnail is taken, which must show the world and not this.
+                if (recorder.tick() == 90) mc.setScreen(new net.minecraft.client.gui.screens.ChatScreen("thumbnail test"));
+                if (recorder.tick() == 110) mc.setScreen(null);
                 if (recorder.tick() >= RECORD_TICKS) {
                     screenshot(mc, "live");
                     entitiesAtEnd = count(mc);
@@ -166,7 +169,9 @@ public final class SelfTest {
             case OPEN_REPLAY -> {
                 ReplayMeta meta = ReplayMeta.read(replayDir);
                 check(meta.finished, "metadata not marked finished");
-                check(Files.exists(replayDir.resolve(com.flurben.flashbackreforged.record.Thumbnails.FILE)), "replay has no thumbnail");
+                Path thumbnail = replayDir.resolve(com.flurben.flashbackreforged.record.Thumbnails.FILE);
+                check(Files.exists(thumbnail), "replay has no thumbnail");
+                if (Files.exists(thumbnail)) Files.copy(thumbnail, mc.gameDirectory.toPath().resolve("flashback_reforged-selftest/thumbnail.png"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 check(Files.exists(replayDir.resolve("registries.nbt")), "registry snapshot missing");
                 RESULT.put("replaySizeBytes", Files.walk(replayDir).filter(Files::isRegularFile).mapToLong(p -> p.toFile().length()).sum());
                 // Same route as the replay browser: opening renders nested frames, so it can't happen inside a tick.

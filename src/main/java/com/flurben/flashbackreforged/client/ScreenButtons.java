@@ -91,6 +91,12 @@ public final class ScreenButtons {
         if (Recorder.active() == null && !ReplayPlayer.isActive()) ClientEvents.toggleRecording(mc);
     }
 
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.HIGHEST)
+    public static void beforeGui(RenderGuiEvent.Pre event) {
+        Recorder recorder = Recorder.active();
+        if (recorder != null) recorder.beforeGui();
+    }
+
     /** The recording state is never shown in the recording itself: this is drawn on the live HUD only. */
     @SubscribeEvent
     public static void indicator(RenderGuiEvent.Post event) {
