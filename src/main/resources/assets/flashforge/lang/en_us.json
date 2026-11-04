@@ -34,5 +34,10 @@
   "flashforge.settings.auto.always": "Always",
   "flashforge.settings.indicator": "Recording Indicator",
   "flashforge.settings.voice": "Record Voice Chat",
-  "flashforge.settings.ffmpeg": "FFmpeg path (empty to find it automatically)"
+  "flashforge.settings.ffmpeg": "FFmpeg path (empty to find it automatically)",
+  "key.flashforge.add_marker_2": "Add Marker (Green)",
+  "key.flashforge.add_marker_3": "Add Marker (Blue)",
+  "key.flashforge.add_marker_4": "Add Marker (Yellow)",
+  "flashforge.pause.cancel": "Cancel Recording",
+  "flashforge.pause.cancel_confirm": "Throw this recording away?"
 }

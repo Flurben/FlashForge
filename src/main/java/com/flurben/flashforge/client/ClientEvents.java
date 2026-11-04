@@ -26,6 +26,9 @@ public final class ClientEvents {
     public static final KeyMapping TOGGLE_RECORDING = new KeyMapping("key.flashforge.toggle_recording", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
     public static final KeyMapping PAUSE_RECORDING = new KeyMapping("key.flashforge.pause_recording", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
     public static final KeyMapping ADD_MARKER = new KeyMapping("key.flashforge.add_marker", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
+    public static final KeyMapping ADD_MARKER_2 = new KeyMapping("key.flashforge.add_marker_2", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
+    public static final KeyMapping ADD_MARKER_3 = new KeyMapping("key.flashforge.add_marker_3", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
+    public static final KeyMapping ADD_MARKER_4 = new KeyMapping("key.flashforge.add_marker_4", GLFW.GLFW_KEY_UNKNOWN, CATEGORY);
 
     @Mod.EventBusSubscriber(modid = FlashForge.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
     public static final class ModBus {
@@ -36,6 +39,9 @@ public final class ClientEvents {
             event.register(TOGGLE_RECORDING);
             event.register(PAUSE_RECORDING);
             event.register(ADD_MARKER);
+            event.register(ADD_MARKER_2);
+            event.register(ADD_MARKER_3);
+            event.register(ADD_MARKER_4);
         }
     }
 
@@ -113,6 +119,35 @@ public final class ClientEvents {
         while (ADD_MARKER.consumeClick()) {
             Recorder recorder = Recorder.active();
             if (recorder != null) addMarker(mc, recorder);
+        }
+        // Different keys, different colors: easy to tell apart on the timeline later.
+        markerKey(mc, ADD_MARKER_2, 0x55FF55);
+        markerKey(mc, ADD_MARKER_3, 0x5599FF);
+        markerKey(mc, ADD_MARKER_4, 0xFFDD33);
+        Recorder recorder = Recorder.active();
+        if (recorder != null && mc.level != null) {
+            String dimension = mc.level.dimension().location().toString();
+            if (lastDimension != null && !lastDimension.equals(dimension)) {
+                var marker = new com.flurben.flashforge.replay.ReplayMeta.Marker();
+                marker.color = 0xAA55FF;
+                marker.description = dimension;
+                recorder.addMarker(marker);
+            }
+            lastDimension = dimension;
+        } else {
+            lastDimension = null;
+        }
+    }
+
+    private static String lastDimension;
+
+    private static void markerKey(Minecraft mc, KeyMapping key, int color) {
+        while (key.consumeClick()) {
+            Recorder recorder = Recorder.active();
+            if (recorder != null) {
+                addMarker(mc, recorder);
+                recorder.meta().markers.get(recorder.tick()).color = color;
+            }
         }
     }
 

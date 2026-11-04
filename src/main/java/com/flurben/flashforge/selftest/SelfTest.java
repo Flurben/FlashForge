@@ -49,6 +49,10 @@ public final class SelfTest {
     private static final String WORLD = System.getProperty("flashforge.selftest.world", "flashforge_selftest");
     private static final int RECORD_TICKS = Integer.getInteger("flashforge.selftest.ticks", 200);
 
+    // Modpacks have their own terrain, which is the one worth testing.
+    private static final net.minecraft.resources.ResourceKey<net.minecraft.world.level.levelgen.presets.WorldPreset> PRESET = System.getProperty("flashforge.selftest.preset") == null ? WorldPresets.NORMAL
+            : net.minecraft.resources.ResourceKey.create(Registries.WORLD_PRESET, new net.minecraft.resources.ResourceLocation(System.getProperty("flashforge.selftest.preset")));
+
     private static Step step = Step.WAIT_TITLE;
     private static int wait;
     private static Path replayDir;
@@ -342,7 +346,7 @@ public final class SelfTest {
         }
         LevelSettings settings = new LevelSettings(WORLD, GameType.CREATIVE, false, Difficulty.EASY, true, new GameRules(), WorldDataConfiguration.DEFAULT);
         WorldOptions options = new WorldOptions(1234L, true, false);
-        mc.createWorldOpenFlows().createFreshLevel(WORLD, settings, options, access -> access.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(WorldPresets.NORMAL).value().createWorldDimensions());
+        mc.createWorldOpenFlows().createFreshLevel(WORLD, settings, options, access -> access.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(PRESET).value().createWorldDimensions());
     }
 
     private static void setupWorld(Minecraft mc) {

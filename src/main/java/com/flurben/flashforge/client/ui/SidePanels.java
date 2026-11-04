@@ -31,6 +31,7 @@ public final class SidePanels {
     private final ImString newSceneName = new ImString(64);
     private final ImString markerText = new ImString(128);
     private final ImString skinName = new ImString(32);
+    private final ImString playerFilter = new ImString(32);
 
     float preferredWidth() {
         return 340f;
@@ -84,6 +85,7 @@ public final class SidePanels {
             v.showHud = toggle("Show HUD", v.showHud);
             ImGui.beginDisabled(!v.showHud);
             v.showHotbar = toggle("Hotbar", v.showHotbar);
+            v.showActionBar = toggle("Action Bar", v.showActionBar);
             v.showChat = toggle("Chat", v.showChat);
             v.showBossBar = toggle("Boss Bars", v.showBossBar);
             v.showTitles = toggle("Titles", v.showTitles);
@@ -132,6 +134,8 @@ public final class SidePanels {
                 if (ImGui.sliderFloat("Fog Start", start, 0f, 2048f)) v.fogStart = start[0];
                 if (ImGui.sliderFloat("Fog End", end, 0f, 2048f)) v.fogEnd = end[0];
             }
+            v.overrideFogColor = toggle("Override Fog Color", v.overrideFogColor);
+            if (v.overrideFogColor) ImGui.colorEdit3("Fog Color", v.fogColor);
             v.overrideSkyColor = toggle("Solid Sky Color", v.overrideSkyColor);
             if (v.overrideSkyColor) ImGui.colorEdit3("Sky Color", v.skyColor);
         }
@@ -161,10 +165,19 @@ public final class SidePanels {
         List<PlayerInfo> players = new ArrayList<>(mc.getConnection().getOnlinePlayers());
         players.sort(Comparator.comparing(p -> p.getProfile().getName(), String.CASE_INSENSITIVE_ORDER));
         if (ImGui.button("Stop Spectating")) replay.spectate(null);
+        ImGui.sameLine();
+        if (ImGui.button("Hide All")) {
+            for (PlayerInfo info : players) v.hiddenPlayers.add(info.getProfile().getId().toString());
+        }
+        ImGui.sameLine();
+        if (ImGui.button("Show All")) v.hiddenPlayers.clear();
+        v.hideSpectators = toggle("Hide All Spectators", v.hideSpectators);
+        ImGui.inputTextWithHint("##playerFilter", "Search", this.playerFilter);
+        String playerNeedle = this.playerFilter.get().toLowerCase();
         ImGui.separator();
         for (PlayerInfo info : players) {
             String id = info.getProfile().getId().toString();
-            if ("Viewer".equals(info.getProfile().getName())) continue;
+            if ("Viewer".equals(info.getProfile().getName()) || !info.getProfile().getName().toLowerCase().contains(playerNeedle)) continue;
             ImGui.pushID(id);
             Player player = mc.level.getPlayerByUUID(info.getProfile().getId());
             ImGui.text(info.getProfile().getName() + (player == null ? " (out of range)" : ""));
@@ -181,6 +194,7 @@ public final class SidePanels {
             ImGui.endDisabled();
             String skin = v.skinOverrides.get(id);
             this.skinName.set(skin == null ? "" : skin);
+            if (ImGui.checkbox("Hide Cape", v.hiddenCapes.contains(id))) toggle(v.hiddenCapes, id);
             ImGui.setNextItemWidth(ImGui.getContentRegionAvailX() - 60);
             if (ImGui.inputTextWithHint("Skin", "Show another player's skin", this.skinName, imgui.flag.ImGuiInputTextFlags.EnterReturnsTrue)) {
                 if (this.skinName.get().isBlank()) v.skinOverrides.remove(id);
@@ -227,6 +241,7 @@ public final class SidePanels {
                     ImGui.sameLine();
                     if (ImGui.smallButton("TP")) replay.camera().teleport(e.getX(), e.getY() + 1.6, e.getZ() - 3, 0, 15);
                     if (ImGui.checkbox("Glow", v.glowingEntities.contains(id))) toggle(v.glowingEntities, id);
+                    if (ImGui.checkbox("Never Glow", v.noGlowEntities.contains(id))) toggle(v.noGlowEntities, id);
                     if (ImGui.checkbox("Hide Name Tag", v.hiddenNametags.contains(id))) toggle(v.hiddenNametags, id);
                     if (ImGui.checkbox("Mute", v.mutedEntities.contains(id))) toggle(v.mutedEntities, id);
                     if (ImGui.smallButton("Copy UUID")) ImGui.setClipboardText(id);
@@ -251,6 +266,17 @@ public final class SidePanels {
         float[] roll = {camera.roll()};
         if (ImGui.sliderFloat("Roll", roll, -180f, 180f, "%.1f")) camera.setRoll(roll[0]);
         if (ImGui.button("Reset Roll")) camera.setRoll(0);
+        float[] momentum = {camera.momentum};
+        if (ImGui.sliderFloat("Momentum", momentum, 1f, 40f, "%.1f")) camera.momentum = momentum[0];
+        camera.horizontal = toggle("Move Along Horizon", camera.horizontal);
+        camera.lockX = toggle("Lock X", camera.lockX);
+        ImGui.sameLine();
+        camera.lockY = toggle("Lock Y", camera.lockY);
+        ImGui.sameLine();
+        camera.lockZ = toggle("Lock Z", camera.lockZ);
+        camera.lockYaw = toggle("Lock Yaw", camera.lockYaw);
+        ImGui.sameLine();
+        camera.lockPitch = toggle("Lock Pitch", camera.lockPitch);
         if (mc.player != null) {
             ImGui.separator();
             ImGui.text(String.format("Position  %.2f, %.2f, %.2f", camera.x(), camera.y(), camera.z()));

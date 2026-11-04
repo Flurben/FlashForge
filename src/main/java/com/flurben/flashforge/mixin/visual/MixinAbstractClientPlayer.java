@@ -10,6 +10,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(AbstractClientPlayer.class)
 public abstract class MixinAbstractClientPlayer {
+    @Inject(method = "getCloakTextureLocation", at = @At("HEAD"), cancellable = true)
+    private void flashforge$cape(CallbackInfoReturnable<ResourceLocation> cir) {
+        if (com.flurben.flashforge.client.VisualsRuntime.hideCape((AbstractClientPlayer) (Object) this)) cir.setReturnValue(null);
+    }
+
     @Inject(method = "getSkinTextureLocation", at = @At("HEAD"), cancellable = true)
     private void flashforge$skin(CallbackInfoReturnable<ResourceLocation> cir) {
         ResourceLocation skin = SpectatorHud.skinFor((AbstractClientPlayer) (Object) this);

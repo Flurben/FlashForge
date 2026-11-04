@@ -21,6 +21,7 @@ final class MenuBar {
             ImGui.separator();
             if (ImGui.menuItem("Export Video...")) ExportDialog.get().open(ExportDialog.Mode.VIDEO);
             if (ImGui.menuItem("Export Screenshot...")) ExportDialog.get().open(ExportDialog.Mode.SCREENSHOT);
+            if (ImGui.menuItem("Export Queue (" + com.flurben.flashforge.export.ExportManager.queue().size() + ")")) ExportDialog.get().open(ExportDialog.Mode.VIDEO);
             ImGui.separator();
             if (ImGui.menuItem("Exit Replay")) replay.exit();
             ImGui.endMenu();

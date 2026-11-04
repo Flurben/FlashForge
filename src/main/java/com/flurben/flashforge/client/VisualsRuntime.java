@@ -78,16 +78,25 @@ public final class VisualsRuntime {
         if (v == null) return false;
         if (entity instanceof LocalPlayer) return false;
         if (entity instanceof Player player) {
-            if (!v.renderPlayers || v.hiddenPlayers.contains(player.getUUID().toString())) return true;
+            if (!v.renderPlayers || v.hiddenPlayers.contains(player.getUUID().toString()) || (v.hideSpectators && player.isSpectator())) return true;
         } else if (!v.renderEntities) {
             return true;
         }
         return !v.hiddenEntityTypes.isEmpty() && v.hiddenEntityTypes.contains(typeId(entity));
     }
 
-    public static boolean forceGlow(Entity entity) {
+    /** Null leaves the entity's own glow alone. */
+    public static Boolean glowOverride(Entity entity) {
         Visuals v = visuals();
-        return v != null && !v.glowingEntities.isEmpty() && v.glowingEntities.contains(entity.getUUID().toString());
+        if (v == null) return null;
+        String id = entity.getUUID().toString();
+        if (v.noGlowEntities.contains(id)) return false;
+        return v.glowingEntities.contains(id) ? Boolean.TRUE : null;
+    }
+
+    public static boolean hideCape(Entity entity) {
+        Visuals v = visuals();
+        return v != null && v.hiddenCapes.contains(entity.getUUID().toString());
     }
 
     private static String typeId(Entity entity) {
@@ -111,7 +120,10 @@ public final class VisualsRuntime {
             Visuals v = visuals();
             if (v == null) return;
             ResourceLocation id = event.getOverlay().id();
-            if (id.equals(VanillaGuiOverlay.HOTBAR.id()) && !v.showHotbar) event.setCanceled(true);
+            // A crosshair only means something when looking through a player's eyes.
+            if (id.equals(VanillaGuiOverlay.CROSSHAIR.id()) && ReplayPlayer.active().spectated() == null) event.setCanceled(true);
+            if (id.equals(VanillaGuiOverlay.RECORD_OVERLAY.id()) && !v.showActionBar) event.setCanceled(true);
+            else if (id.equals(VanillaGuiOverlay.HOTBAR.id()) && !v.showHotbar) event.setCanceled(true);
             else if (id.equals(VanillaGuiOverlay.CHAT_PANEL.id()) && !v.showChat) event.setCanceled(true);
             else if (id.equals(VanillaGuiOverlay.BOSS_EVENT_PROGRESS.id()) && !v.showBossBar) event.setCanceled(true);
             else if (id.equals(VanillaGuiOverlay.TITLE_TEXT.id()) && !v.showTitles) event.setCanceled(true);
@@ -156,10 +168,12 @@ public final class VisualsRuntime {
         @SubscribeEvent
         public static void fogColor(ViewportEvent.ComputeFogColor event) {
             Visuals v = visuals();
-            if (v != null && v.overrideSkyColor) {
-                event.setRed(v.skyColor[0]);
-                event.setGreen(v.skyColor[1]);
-                event.setBlue(v.skyColor[2]);
+            if (v == null) return;
+            float[] color = v.overrideSkyColor ? v.skyColor : v.overrideFogColor ? v.fogColor : null;
+            if (color != null) {
+                event.setRed(color[0]);
+                event.setGreen(color[1]);
+                event.setBlue(color[2]);
             }
         }
 

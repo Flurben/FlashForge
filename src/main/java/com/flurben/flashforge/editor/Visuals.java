@@ -16,6 +16,7 @@ public final class Visuals {
     public boolean showTabList = false;
     public boolean showHotbar = false;
     public boolean showHand = false;
+    public boolean showActionBar = false;
 
     // World
     public boolean renderBlocks = true;
@@ -44,6 +45,9 @@ public final class Visuals {
     public float fogEnd = 256f;
     public boolean overrideSkyColor = false;
     public float[] skyColor = {0f, 1f, 0f};
+    public boolean overrideFogColor = false;
+    public float[] fogColor = {0.7f, 0.8f, 1f};
+    public boolean hideSpectators = false;
     public boolean noBob = true;
 
     // Compositing guides, editor only
@@ -59,6 +63,8 @@ public final class Visuals {
     public Set<String> hiddenNametags = new HashSet<>();
     public Set<String> glowingEntities = new HashSet<>();
     public Set<String> mutedEntities = new HashSet<>();
+    public Set<String> hiddenCapes = new HashSet<>();
+    public Set<String> noGlowEntities = new HashSet<>();
     public Set<String> hiddenParticles = new HashSet<>();
     /** Player UUID to the UUID whose skin and cape should be shown instead. */
     public Map<String, String> skinOverrides = new HashMap<>();

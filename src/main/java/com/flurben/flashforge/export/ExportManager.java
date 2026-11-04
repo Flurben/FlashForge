@@ -27,6 +27,7 @@ public final class ExportManager {
     private static final Deque<ExportSettings> QUEUE = new ArrayDeque<>();
     private static final List<String> HISTORY = new ArrayList<>();
     private static Job job;
+    private static boolean running;
     private static String lastError;
     private static Path lastOutput;
 
@@ -36,8 +37,19 @@ public final class ExportManager {
         return job != null;
     }
 
+    /** Starts as soon as the current job is done. */
     public static void enqueue(ExportSettings settings) {
         QUEUE.addLast(settings);
+        running = true;
+    }
+
+    /** Waits with the rest of the queue until {@link #startQueue()}. */
+    public static void hold(ExportSettings settings) {
+        QUEUE.addLast(settings);
+    }
+
+    public static void startQueue() {
+        running = true;
     }
 
     public static Deque<ExportSettings> queue() {
@@ -71,7 +83,8 @@ public final class ExportManager {
     /** Called at the start of each frame's clock update. Returns the ticks to run, or -1 to leave the clock alone. */
     public static int onAdvanceTime(net.minecraft.client.Timer timer) {
         if (job == null) {
-            if (QUEUE.isEmpty() || !ReplayPlayer.isActive()) return -1;
+            if (QUEUE.isEmpty()) running = false;
+            if (!running || !ReplayPlayer.isActive()) return -1;
             start(QUEUE.pollFirst());
             if (job == null) return -1;
         }

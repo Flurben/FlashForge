@@ -63,6 +63,8 @@ public final class SpectatorHud {
             viewer.experienceProgress = player.experienceProgress = hud.xpProgress();
             player.setAirSupply(hud.air());
         }
+        // Spectators are flagged invisible, which would also hide the arm.
+        viewer.setInvisible(player.isInvisible());
         viewer.swinging = player.swinging;
         viewer.swingTime = player.swingTime;
         viewer.swingingArm = player.swingingArm;

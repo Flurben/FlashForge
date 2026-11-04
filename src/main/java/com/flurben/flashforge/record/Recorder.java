@@ -315,6 +315,16 @@ public final class Recorder {
         }
     }
 
+    /** Stops and throws the recording away. */
+    public void cancel() {
+        Path folder = stop();
+        try {
+            com.flurben.flashforge.replay.ReplayStorage.delete(folder);
+        } catch (IOException e) {
+            FlashForge.LOGGER.warn("Could not remove cancelled recording {}", folder, e);
+        }
+    }
+
     public Path stop() {
         active = null;
         this.meta.finished = true;

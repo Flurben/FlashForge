@@ -17,7 +17,13 @@ public final class ViewerCamera {
     private float fov = DEFAULT_FOV;
     private float speedMultiplier = 1f;
     private long lastFrame;
+    private float heldYaw, heldPitch;
     private boolean inputEnabled = true;
+    /** How quickly movement starts and stops: higher is snappier, lower drifts. */
+    public float momentum = 12f;
+    /** Moves along the horizon even when looking up or down. */
+    public boolean horizontal = true;
+    public boolean lockX, lockY, lockZ, lockYaw, lockPitch;
 
     public void syncFrom(LocalPlayer player) {
         this.x = player.getX();
@@ -96,21 +102,26 @@ public final class ViewerCamera {
             double strafe = axis(mc.options.keyLeft.isDown(), mc.options.keyRight.isDown());
             double up = axis(mc.options.keyJump.isDown(), mc.options.keyShift.isDown());
 
-            Vec3 look = Vec3.directionFromRotation(0, player.getYRot());
-            Vec3 side = new Vec3(look.z, 0, -look.x);
+            Vec3 look = Vec3.directionFromRotation(this.horizontal ? 0 : player.getXRot(), player.getYRot());
+            Vec3 flat = Vec3.directionFromRotation(0, player.getYRot());
+            Vec3 side = new Vec3(flat.z, 0, -flat.x);
             double max = 10.0 * this.speedMultiplier * (mc.options.keySprint.isDown() ? 3.0 : 1.0);
             double tx = (look.x * forward + side.x * strafe) * max;
-            double ty = up * max;
+            double ty = up * max + look.y * forward * max;
             double tz = (look.z * forward + side.z * strafe) * max;
 
             // Exponential smoothing keeps movement framerate-independent and avoids abrupt stops on video.
-            double blend = 1 - Math.exp(-12.0 * dt);
+            double blend = 1 - Math.exp(-this.momentum * dt);
             this.vx += (tx - this.vx) * blend;
             this.vy += (ty - this.vy) * blend;
             this.vz += (tz - this.vz) * blend;
-            this.x += this.vx * dt;
-            this.y += this.vy * dt;
-            this.z += this.vz * dt;
+            if (!this.lockX) this.x += this.vx * dt;
+            if (!this.lockY) this.y += this.vy * dt;
+            if (!this.lockZ) this.z += this.vz * dt;
+            if (this.lockYaw) player.setYRot(this.heldYaw);
+            else this.heldYaw = player.getYRot();
+            if (this.lockPitch) player.setXRot(this.heldPitch);
+            else this.heldPitch = player.getXRot();
         }
         apply(player);
     }

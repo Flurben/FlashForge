@@ -100,9 +100,29 @@ public final class ExportDialog {
                 this.open.set(false);
             }
             ImGui.sameLine();
-            if (this.mode == Mode.VIDEO && ImGui.button("Add To Queue") && canStart) ExportManager.enqueue(build(replay));
+            if (this.mode == Mode.VIDEO && ImGui.button("Add To Queue") && canStart) ExportManager.hold(build(replay));
 
-            if (!ExportManager.queue().isEmpty()) ImGui.text("Queued: " + ExportManager.queue().size());
+            if (!ExportManager.queue().isEmpty()) {
+                ImGui.separator();
+                ImGui.text("Queue");
+                ExportSettings remove = null;
+                for (ExportSettings job : ExportManager.queue()) {
+                    ImGui.pushID(job.hashCode());
+                    ImGui.bulletText(job.name + "  " + job.width + "x" + job.height);
+                    ImGui.sameLine();
+                    if (ImGui.smallButton("Remove")) remove = job;
+                    ImGui.popID();
+                }
+                if (remove != null) ExportManager.queue().remove(remove);
+                if (ImGui.button("Start All")) ExportManager.startQueue();
+            }
+            if (ExportManager.lastOutput() != null) {
+                ImGui.separator();
+                ImGui.textWrapped("Last export: " + ExportManager.lastOutput());
+                if (ImGui.button("Open File")) net.minecraft.Util.getPlatform().openFile(ExportManager.lastOutput().toFile());
+                ImGui.sameLine();
+                if (ImGui.button("Open Folder")) net.minecraft.Util.getPlatform().openFile(ReplayStorage.exports().toFile());
+            }
             if (ExportManager.lastError() != null) ImGui.textColored(1f, 0.4f, 0.4f, 1f, "Last export failed: " + ExportManager.lastError());
             for (String line : ExportManager.history()) ImGui.textDisabled(line);
         }

@@ -48,6 +48,7 @@ public abstract class MixinMinecraftHooks {
 
     @Inject(method = "shouldEntityAppearGlowing", at = @At("HEAD"), cancellable = true)
     private void flashforge$glow(Entity entity, CallbackInfoReturnable<Boolean> cir) {
-        if (VisualsRuntime.forceGlow(entity)) cir.setReturnValue(true);
+        Boolean glow = VisualsRuntime.glowOverride(entity);
+        if (glow != null) cir.setReturnValue(glow);
     }
 }

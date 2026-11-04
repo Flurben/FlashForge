@@ -59,6 +59,12 @@ public final class ScreenButtons {
                     recorder.setPaused(!recorder.paused());
                     mc.setScreen(null);
                 }).bounds(6, y + 24, 120, 20).build());
+                event.addListener(Button.builder(Component.translatable("flashforge.pause.cancel"), b ->
+                        mc.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(yes -> {
+                            if (yes) recorder.cancel();
+                            mc.setScreen(null);
+                        }, Component.translatable("flashforge.pause.cancel_confirm"), Component.translatable("flashforge.browser.delete_warning"))))
+                        .bounds(6, y + 72, 120, 20).build());
                 event.addListener(Button.builder(Component.translatable("flashforge.pause.marker"), b -> {
                     ClientEvents.addMarker(mc, recorder);
                     mc.setScreen(null);
