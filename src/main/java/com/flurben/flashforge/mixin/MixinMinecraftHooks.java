@@ -37,7 +37,13 @@ public abstract class MixinMinecraftHooks {
     /** A replay has no use for attack, inventory or hotbar keys; the viewer is not a player in the recorded world. */
     @Inject(method = "handleKeybinds", at = @At("HEAD"), cancellable = true)
     private void flashforge$noGameKeys(CallbackInfo ci) {
-        if (ReplayPlayer.isActive()) ci.cancel();
+        if (!ReplayPlayer.isActive()) return;
+        ci.cancel();
+        // Chat stays reachable, because /hide and /show are typed there.
+        Minecraft mc = (Minecraft) (Object) this;
+        if (ExportManager.isExporting()) return;
+        while (mc.options.keyChat.consumeClick()) mc.setScreen(new net.minecraft.client.gui.screens.ChatScreen(""));
+        while (mc.options.keyCommand.consumeClick()) mc.setScreen(new net.minecraft.client.gui.screens.ChatScreen("/"));
     }
 
     /** Clicking away from the game must not interrupt an export or cover the editor with the pause menu. */

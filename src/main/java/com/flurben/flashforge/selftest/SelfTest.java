@@ -89,7 +89,7 @@ public final class SelfTest {
     }
 
     private enum Step {
-        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, FAR_VIEW, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, SPECTATE_PLAY, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
+        WAIT_TITLE, WAIT_WORLD, SETUP_WORLD, RECORDING, LEAVE, OPEN_REPLAY, PLAYING, SEEK_FORWARD, SEEK_BACK, FAR_VIEW, EDITOR, VISUALS, EXPORT_VIDEO, WAIT_VIDEO, WAIT_SCREENSHOT, SPECTATE, SPECTATE_PLAY, F_SNOW, F_OVERCAST, F_COMMANDS, F_PICK, F_AUDIO, F_ASPECT, F_ASPECT_DONE, F_TIP, F_HIDE, F_RNG_START, F_RNG_A, F_RNG_B, F_RNG_DONE, COMBINE, BROWSER, OPEN_COMBINED, COMBINED_CROSS, COMBINED_DONE, FINISH, DONE
     }
 
     public static boolean enabled() {
@@ -116,6 +116,13 @@ public final class SelfTest {
     private static void run(Minecraft mc) throws Exception {
         if (wait > 0) {
             wait--;
+            return;
+        }
+        if (afterShot != null) {
+            Runnable action = afterShot;
+            afterShot = null;
+            action.run();
+            wait = 20;
             return;
         }
         switch (step) {
@@ -159,6 +166,7 @@ public final class SelfTest {
             case OPEN_REPLAY -> {
                 ReplayMeta meta = ReplayMeta.read(replayDir);
                 check(meta.finished, "metadata not marked finished");
+                check(Files.exists(replayDir.resolve(com.flurben.flashforge.record.Thumbnails.FILE)), "replay has no thumbnail");
                 check(Files.exists(replayDir.resolve("registries.nbt")), "registry snapshot missing");
                 RESULT.put("replaySizeBytes", Files.walk(replayDir).filter(Files::isRegularFile).mapToLong(p -> p.toFile().length()).sum());
                 // Same route as the replay browser: opening renders nested frames, so it can't happen inside a tick.
@@ -313,7 +321,117 @@ public final class SelfTest {
             }
             case SPECTATE_PLAY -> {
                 EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/spectate_playing.png"));
-                ReplayPlayer.active().setPaused(true);
+                ReplayPlayer replay = ReplayPlayer.active();
+                replay.setPaused(true);
+                replay.spectate(null);
+                replay.editor().visuals().showHud = false;
+                replay.editor().visuals().showHand = false;
+                replay.editor().setKeyframesDriveCamera(false);
+                replay.editor().visuals().weather = 5;
+                placeCamera(mc, replay);
+                go(Step.F_SNOW, 40);
+            }
+            case F_SNOW -> {
+                check(mc.level.getRainLevel(1f) == 1f, "snow override did not start precipitation");
+                shot(mc, "weather_snow", () -> ReplayPlayer.active().editor().visuals().weather = 4);
+                go(Step.F_OVERCAST, 5);
+            }
+            case F_OVERCAST -> {
+                check(com.flurben.flashforge.client.VisualsRuntime.hideWeather(), "overcast still draws rain");
+                shot(mc, "weather_overcast", () -> ReplayPlayer.active().editor().visuals().weather = 0);
+                go(Step.F_COMMANDS, 5);
+            }
+            case F_COMMANDS -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                var hidden = replay.editor().visuals().hiddenEntities;
+                mc.player.connection.sendCommand("hide @e[type=minecraft:pig]");
+                check(!hidden.isEmpty(), "/hide did not hide the pig");
+                RESULT.put("hiddenByCommand", hidden.size());
+                mc.player.connection.sendCommand("show @e[type=minecraft:pig]");
+                check(hidden.isEmpty(), "/show did not bring the pig back");
+                pickTarget = placeFacingClearEntity(mc, replay);
+                check(pickTarget != null, "no entity with a clear view from any side");
+                RESULT.put("pickTarget", pickTarget == null ? "none" : net.minecraft.world.entity.EntityType.getKey(pickTarget.getType()).toString());
+                go(Step.F_PICK, 20);
+            }
+            case F_PICK -> {
+                Entity picked = EditorUi.get().pickAt(0, 0);
+                check(picked != null && pickTarget != null && picked.getType() == pickTarget.getType(), "picking at the center found " + picked);
+                if (picked == null) picked = pickTarget;
+                Entity elsewhere = EditorUi.get().pickAt(0.95, 0.95);
+                RESULT.put("pickedOffCenter", elsewhere == null ? "nothing" : elsewhere.getType().toString());
+                check(elsewhere != picked, "picking far from the entity still found it");
+                pickTarget = picked;
+                EditorUi.get().entityPopup().open(picked);
+                ReplayPlayer.active().editor().visuals().audioSource = picked.getUUID().toString();
+                go(Step.F_AUDIO, 20);
+            }
+            case F_AUDIO -> {
+                ReplayPlayer replay = ReplayPlayer.active();
+                Entity source = null;
+                for (Entity e : mc.level.entitiesForRendering()) {
+                    if (e.getUUID().toString().equals(replay.editor().visuals().audioSource)) source = e;
+                }
+                var heard = com.flurben.flashforge.client.VisualsRuntime.lastListener();
+                RESULT.put("heardFromDistance", heard == null || source == null ? -1 : heard.distanceTo(source.getEyePosition()));
+                check(source != null && heard != null && heard.distanceTo(source.getEyePosition()) < 0.5, "sounds are not heard from the audio source");
+                shot(mc, "entity_popup", () -> {
+                    replay.editor().visuals().audioSource = null;
+                    EditorUi.get().entityPopup().close();
+                    replay.editor().visuals().sizing = 1;
+                    replay.editor().visuals().viewAspect = 1f;
+                });
+                go(Step.F_ASPECT, 5);
+            }
+            case F_ASPECT -> {
+                check(mc.getWindow().getWidth() == mc.getWindow().getHeight(), "1:1 view renders at " + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight());
+                RESULT.put("squareSize", mc.getWindow().getWidth());
+                shot(mc, "aspect_square", () -> ReplayPlayer.active().editor().visuals().sizing = 3);
+                go(Step.F_ASPECT_DONE, 5);
+            }
+            case F_ASPECT_DONE -> {
+                shot(mc, "behind_panels", () -> {
+                    ReplayPlayer.active().editor().visuals().sizing = 0;
+                    EditorUi.get().tips().show();
+                });
+                testKeyframeMath();
+                go(Step.F_TIP, 5);
+            }
+            case F_TIP -> {
+                check(mc.getWindow().getWidth() != mc.getWindow().getHeight(), "view stayed square after going back to the window's shape");
+                shot(mc, "tip", () -> {
+                    EditorUi.get().tips().close();
+                    mc.player.connection.sendCommand("hide " + pickTarget.getUUID());
+                });
+                go(Step.F_HIDE, 5);
+            }
+            case F_HIDE -> {
+                check(!ReplayPlayer.active().editor().visuals().hiddenEntities.isEmpty(), "/hide by UUID did not work");
+                shot(mc, "hidden_outline");
+                go(Step.F_RNG_START, 5);
+            }
+            case F_RNG_START -> {
+                rngExport("rng_a");
+                go(Step.F_RNG_A, 5);
+            }
+            case F_RNG_A -> {
+                if (ExportManager.isExporting() || !ExportManager.queue().isEmpty()) return;
+                rngExport("rng_b");
+                go(Step.F_RNG_B, 5);
+            }
+            case F_RNG_B -> {
+                if (ExportManager.isExporting() || !ExportManager.queue().isEmpty()) return;
+                Path a = lastFrame("rng_a");
+                Path b = lastFrame("rng_b");
+                RESULT.put("repeatExportIdentical", java.util.Arrays.equals(Files.readAllBytes(a), Files.readAllBytes(b)));
+                Files.copy(a, mc.gameDirectory.toPath().resolve("flashforge-selftest/hidden_export.png"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                ReplayPlayer replay = ReplayPlayer.active();
+                replay.editor().visuals().hiddenEntities.clear();
+                replay.editor().setKeyframesDriveCamera(true);
+                go(Step.F_RNG_DONE, 5);
+            }
+            case F_RNG_DONE -> {
+                RESULT.put("packetFailures", ReplayPlayer.active().packetFailures());
                 go(Step.COMBINE, 10);
             }
             case COMBINE -> {
@@ -367,6 +485,113 @@ public final class SelfTest {
             default -> {
             }
         }
+    }
+
+    private static void shot(Minecraft mc, String name) {
+        EditorUi.get().requestWindowShot(mc.gameDirectory.toPath().resolve("flashforge-selftest/" + name + ".png"));
+    }
+
+    /** A shot is taken on the next frame, so a change that would spoil it has to wait until after. */
+    private static void shot(Minecraft mc, String name, Runnable after) {
+        shot(mc, name);
+        afterShot = after;
+    }
+
+    private static Runnable afterShot;
+
+    private static Entity pickTarget;
+
+    /** A mod pack's rough terrain can hide any one entity, so this looks for one that can be seen, and from which side. */
+    private static Entity placeFacingClearEntity(Minecraft mc, ReplayPlayer replay) {
+        float eye = mc.player.getEyeHeight();
+        java.util.List<Entity> entities = new java.util.ArrayList<>();
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (e != mc.player) entities.add(e);
+        }
+        Entity recorded = mc.level.getEntity(replay.recordedPlayerId());
+        entities.sort(java.util.Comparator.comparingDouble(e -> recorded == null ? 0 : e.distanceToSqr(recorded)));
+        for (Entity target : entities) {
+            net.minecraft.world.phys.Vec3 aim = target.getBoundingBox().getCenter();
+            for (float yaw : new float[]{90f, 270f, 0f, 180f}) {
+                net.minecraft.world.phys.Vec3 from = aim.subtract(net.minecraft.world.phys.Vec3.directionFromRotation(0, yaw).scale(4));
+                var hit = mc.level.clip(new net.minecraft.world.level.ClipContext(from, aim, net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.NONE, mc.player));
+                if (hit.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
+                    replay.camera().teleport(from.x, from.y - eye, from.z, yaw, 0f);
+                    return target;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Entity findStand(Minecraft mc) {
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (e.getType() == net.minecraft.world.entity.EntityType.ARMOR_STAND) return e;
+        }
+        return null;
+    }
+
+    /** Twenty ticks at a frame per tick, from the same place, so two runs can be compared. */
+    private static void rngExport(String name) throws java.io.IOException {
+        Path dir = ReplayStorage.exports().resolve(name);
+        if (Files.exists(dir)) {
+            try (var files = Files.walk(dir)) {
+                for (Path p : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(p);
+            }
+        }
+        ExportSettings s = new ExportSettings();
+        s.name = name;
+        s.width = 1280;
+        s.height = 720;
+        s.fps = 20;
+        s.startTick = 20;
+        s.endTick = 40;
+        s.warmupFrames = 5;
+        s.audio = false;
+        s.format = ExportSettings.Format.PNG_SEQUENCE;
+        s.output = dir;
+        ExportManager.enqueue(s);
+    }
+
+    private static Path lastFrame(String name) throws java.io.IOException {
+        try (var files = Files.list(ReplayStorage.exports().resolve(name))) {
+            return files.sorted().reduce((a, b) -> b).orElseThrow();
+        }
+    }
+
+    private static void close(double[] actual, double... expected) {
+        for (int i = 0; i < expected.length; i++) {
+            check(Math.abs(actual[i] - expected[i]) < 1e-6, "keyframe math: got " + java.util.Arrays.toString(actual) + ", wanted " + java.util.Arrays.toString(expected));
+        }
+    }
+
+    /** The results can be worked out by hand, so these don't depend on anything in the world. */
+    private static void testKeyframeMath() {
+        // Two blocks ahead of a camera at the origin facing +Z (yaw 0).
+        Keyframe k = new Keyframe(new double[]{0, 0, 2, 10, 5, 0}, Interpolation.SMOOTH);
+        com.flurben.flashforge.editor.RelativeOffset turn = new com.flurben.flashforge.editor.RelativeOffset();
+        turn.newX = 100;
+        turn.newY = 64;
+        turn.newZ = -50;
+        turn.newYaw = 90;
+        turn.apply(TrackType.CAMERA, k);
+        // Yaw 90 looks toward -X, so "two blocks ahead" is now two blocks along -X from the new spot.
+        close(k.values, 98, 64, -50, 100, 5, 0);
+
+        Keyframe down = new Keyframe(new double[]{0, 0, 2, 0, 0, 0}, Interpolation.SMOOTH);
+        com.flurben.flashforge.editor.RelativeOffset tilt = new com.flurben.flashforge.editor.RelativeOffset();
+        tilt.newPitch = 90;
+        tilt.apply(TrackType.CAMERA, down);
+        // Pitch 90 looks straight down.
+        close(down.values, 0, -2, 0, 0, 90, 0);
+
+        KeyframeTrack track = new KeyframeTrack(TrackType.FOV);
+        track.keyframes.put(10, new Keyframe(new double[]{1}, Interpolation.SMOOTH));
+        track.keyframes.put(20, new Keyframe(new double[]{2}, Interpolation.SMOOTH));
+        track.keyframes.put(30, new Keyframe(new double[]{3}, Interpolation.SMOOTH));
+        track.scale(java.util.List.of(10, 20, 30), 10, 2.0);
+        check(track.keyframes.keySet().equals(java.util.Set.of(10, 30, 50)), "scaling gave ticks " + track.keyframes.keySet());
+        check(track.keyframes.get(50).values[0] == 3, "scaling mixed up the keyframes");
     }
 
     private static void placeCamera(Minecraft mc, ReplayPlayer replay) {

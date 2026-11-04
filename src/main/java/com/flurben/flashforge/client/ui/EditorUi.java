@@ -31,6 +31,8 @@ public final class EditorUi {
     private final TimelinePanel timeline = new TimelinePanel();
     private final SidePanels side = new SidePanels();
     private final MenuBar menu = new MenuBar(this);
+    private final EntityPopup entityPopup = new EntityPopup();
+    private final TipsWindow tips = new TipsWindow();
     private boolean initialized;
     private boolean failed;
     private boolean hidden;
@@ -40,6 +42,14 @@ public final class EditorUi {
 
     public static EditorUi get() {
         return INSTANCE;
+    }
+
+    public EntityPopup entityPopup() {
+        return this.entityPopup;
+    }
+
+    public TipsWindow tips() {
+        return this.tips;
     }
 
     public SidePanels side() {
@@ -119,6 +129,8 @@ public final class EditorUi {
         }
         if (!visible()) {
             setFlying(false);
+            // With the panels gone the game has the whole window again.
+            if (mc.screen == null) com.flurben.flashforge.client.EditorSizing.request(null);
             finishWindowShot();
             return;
         }
@@ -138,7 +150,9 @@ public final class EditorUi {
             this.timeline.draw(replay, 0, height - timelineHeight, width, timelineHeight);
             this.side.draw(replay, width - sideWidth, menuHeight, sideWidth, height - timelineHeight - menuHeight);
             ExportDialog.get().draw(replay);
-            computeViewport(window, menuHeight, sideWidth, timelineHeight);
+            this.tips.draw(replay);
+            this.entityPopup.draw(replay);
+            computeViewport(window, menuHeight, sideWidth, timelineHeight, replay.editor().visuals());
             updateFlying(mc);
             GuideOverlay.draw(replay, this.viewX, this.viewY, this.viewW, this.viewH, window);
             ImGui.render();
@@ -225,22 +239,60 @@ public final class EditorUi {
         return new int[]{(w[0] - vw) / 2, (h[0] - vh) / 2, vw, vh};
     }
 
-    /** Fits the window's aspect ratio into the space the panels leave, in framebuffer pixels (origin bottom-left). */
-    private void computeViewport(Window window, float top, float right, float bottom) {
-        float scale = (float) window.getWidth() / Math.max(1, window.getScreenWidth());
+    /**
+     * Fits the game image into the space the panels leave, in framebuffer pixels (origin bottom-left). The window's own
+     * width and height can't be used here, since they report the render size and this decides what that should be.
+     */
+    private void computeViewport(Window window, float top, float right, float bottom, com.flurben.flashforge.editor.Visuals visuals) {
+        int[] fbW = new int[1], fbH = new int[1];
+        GLFW.glfwGetFramebufferSize(window.getWindow(), fbW, fbH);
+        float scale = (float) fbW[0] / Math.max(1, window.getScreenWidth());
         float availW = (window.getScreenWidth() - right) * scale;
         float availH = (window.getScreenHeight() - top - bottom) * scale;
-        float aspect = (float) window.getWidth() / Math.max(1, window.getHeight());
-        float w = availW;
-        float h = w / aspect;
-        if (h > availH) {
-            h = availH;
-            w = h * aspect;
+        int[] render = null;
+
+        if (visuals.sizing == 3) {
+            this.viewX = 0;
+            this.viewY = 0;
+            this.viewW = Math.max(1, fbW[0]);
+            this.viewH = Math.max(1, fbH[0]);
+        } else if (visuals.sizing == 2) {
+            this.viewW = Math.max(16, (int) availW);
+            this.viewH = Math.max(16, (int) availH);
+            this.viewX = 0;
+            this.viewY = (int) (bottom * scale);
+            render = new int[]{this.viewW, this.viewH};
+        } else {
+            float aspect = visuals.sizing == 1 ? visuals.viewAspect : (float) fbW[0] / Math.max(1, fbH[0]);
+            float w = availW;
+            float h = w / aspect;
+            if (h > availH) {
+                h = availH;
+                w = h * aspect;
+            }
+            this.viewW = Math.max(16, (int) w);
+            this.viewH = Math.max(16, (int) h);
+            this.viewX = (int) ((availW - w) / 2);
+            this.viewY = (int) (bottom * scale + (availH - h) / 2);
+            if (visuals.sizing == 1) render = new int[]{this.viewW, this.viewH};
         }
-        this.viewW = Math.max(1, (int) w);
-        this.viewH = Math.max(1, (int) h);
-        this.viewX = (int) ((availW - w) / 2);
-        this.viewY = (int) (bottom * scale + (availH - h) / 2);
+        com.flurben.flashforge.client.EditorSizing.request(render);
+    }
+
+    /** The entity at a window position given in screen coordinates, or null. */
+    private net.minecraft.world.entity.Entity pickAtCursor(Window window, double cursorX, double cursorY) {
+        int[] fbW = new int[1], fbH = new int[1];
+        GLFW.glfwGetFramebufferSize(window.getWindow(), fbW, fbH);
+        double scale = (double) fbW[0] / Math.max(1, window.getScreenWidth());
+        double px = cursorX * scale;
+        double py = fbH[0] - cursorY * scale;
+        if (px < this.viewX || py < this.viewY || px > this.viewX + this.viewW || py > this.viewY + this.viewH) return null;
+        return pickAt((px - this.viewX) / this.viewW * 2 - 1, (py - this.viewY) / this.viewH * 2 - 1);
+    }
+
+    /** The entity at a point in the game image: -1 to 1 across and up. */
+    public net.minecraft.world.entity.Entity pickAt(double ndcX, double ndcY) {
+        return EntityPopup.pick(ReplayPlayer.active(), ndcX, ndcY, (double) this.viewW / Math.max(1, this.viewH));
     }
 
     /** Where the game image goes this frame, or null to fill the window. Framebuffer pixels, origin bottom-left. */
@@ -252,10 +304,33 @@ public final class EditorUi {
     private void updateFlying(Minecraft mc) {
         ImGuiIO io = ImGui.getIO();
         boolean overUi = ImGui.isWindowHovered(imgui.flag.ImGuiHoveredFlags.AnyWindow) || io.getWantCaptureMouse();
-        boolean down = GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
-        if (!this.flying && down && !overUi) setFlying(true);
-        else if (this.flying && !down) setFlying(false);
+        long handle = mc.getWindow().getWindow();
+        boolean down = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
+        if (!this.flying && down && !overUi) {
+            double[] x = new double[1], y = new double[1];
+            GLFW.glfwGetCursorPos(handle, x, y);
+            this.pressX = x[0];
+            this.pressY = y[0];
+            this.pressTime = System.nanoTime();
+            this.pressYaw = mc.player.getYRot();
+            this.pressPitch = mc.player.getXRot();
+            setFlying(true);
+        } else if (this.flying && !down) {
+            setFlying(false);
+            // A quick click that didn't turn the camera means "what's this?" rather than "fly".
+            boolean click = System.nanoTime() - this.pressTime < 300_000_000L
+                    && Math.abs(mc.player.getYRot() - this.pressYaw) < 1f && Math.abs(mc.player.getXRot() - this.pressPitch) < 1f;
+            if (click) {
+                GLFW.glfwSetCursorPos(handle, this.pressX, this.pressY);
+                net.minecraft.world.entity.Entity hit = pickAtCursor(mc.getWindow(), this.pressX, this.pressY);
+                if (hit != null) this.entityPopup.open(hit);
+            }
+        }
     }
+
+    private double pressX, pressY;
+    private long pressTime;
+    private float pressYaw, pressPitch;
 
     private void setFlying(boolean flying) {
         if (this.flying == flying) return;

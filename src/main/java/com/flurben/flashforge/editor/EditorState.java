@@ -161,12 +161,6 @@ public final class EditorState {
         if (fov != null) camera.setFov((float) fov[0]);
         else camera.setFov(visuals.overrideFov ? visuals.fov : ViewerCamera.DEFAULT_FOV);
 
-        // Weather override
-        if (visuals.weather > 0) {
-            mc.level.setRainLevel(visuals.weather >= 2 ? 1f : 0f);
-            mc.level.setThunderLevel(visuals.weather == 3 ? 1f : 0f);
-        }
-
         int whole = (int) Math.floor(tick);
         if (whole != this.lastBlockTick) {
             applyBlockOverrides(whole, false);

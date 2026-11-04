@@ -70,7 +70,15 @@ public final class ClientEvents {
                 com.flurben.flashforge.client.SpectatorHud.endFrame();
                 return;
             }
+            VisualsRuntime.updateAudioSource();
+            if (replay == null) EditorSizing.request(null);
+            if (!com.flurben.flashforge.export.ExportManager.isExporting()) EditorSizing.apply(Minecraft.getInstance());
             if (replay == null) return;
+            // Walking and flying change the live game's FOV. The viewer is neither, and the value would otherwise sit
+            // frozen while paused, then zoom during an export's first frames as it caught up.
+            var fov = (com.flurben.flashforge.mixin.accessor.GameRendererInvoker) Minecraft.getInstance().gameRenderer;
+            fov.flashforge$setFovModifier(1f);
+            fov.flashforge$setOldFovModifier(1f);
             com.flurben.flashforge.client.SpectatorHud.beginFrame(replay);
             // The HUD setting travels with the replay and is put back when it closes.
             Minecraft mc = Minecraft.getInstance();

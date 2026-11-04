@@ -4,6 +4,7 @@ import com.flurben.flashforge.editor.EditorState;
 import com.flurben.flashforge.editor.Interpolation;
 import com.flurben.flashforge.editor.Keyframe;
 import com.flurben.flashforge.editor.KeyframeTrack;
+import com.flurben.flashforge.editor.RelativeOffset;
 import com.flurben.flashforge.editor.Scene;
 import com.flurben.flashforge.editor.TrackType;
 import com.flurben.flashforge.playback.ReplayPlayer;
@@ -48,6 +49,21 @@ public final class TimelinePanel {
     private Ref editing;
     private List<Copied> clipboard = new ArrayList<>();
     private final ImString textBuffer = new ImString(512);
+
+    // Where the camera was when keyframes were copied, and which parts of that the paste should be relative to.
+    private double copyX, copyY, copyZ;
+    private float copyYaw, copyPitch;
+    private boolean pasteRelPosition, pasteRelYaw, pasteRelPitch;
+    private boolean relPosition = true, relYaw = true, relPitch;
+    private final imgui.type.ImFloat scalePercent = new imgui.type.ImFloat(100f);
+
+    private boolean scaling;
+    private int scalePivot;
+    private int scaleGrabbed;
+    private boolean boxing;
+    private float boxX, boxY;
+
+    private record Row(KeyframeTrack track, float y) {}
 
     private record Copied(TrackType type, int offset, Keyframe keyframe) {}
 
@@ -104,8 +120,88 @@ public final class TimelinePanel {
             ImGui.endPopup();
         }
         ImGui.sameLine();
+        if (ImGui.button("Keys...")) ImGui.openPopup("keys_menu");
+        if (ImGui.beginPopup("keys_menu")) {
+            drawKeysMenu(replay);
+            ImGui.endPopup();
+        }
+        ImGui.sameLine();
         boolean drive = replay.editor().keyframesDriveCamera();
         if (ImGui.checkbox("Keyframes drive camera", drive)) replay.editor().setKeyframesDriveCamera(!drive);
+    }
+
+    private void drawKeysMenu(ReplayPlayer replay) {
+        ImGui.text(this.selected.size() + " keyframes selected");
+        ImGui.beginDisabled(this.selected.isEmpty());
+        ImGui.separator();
+        ImGui.text("Copy Relative To Camera");
+        if (ImGui.checkbox("Position", this.relPosition)) this.relPosition = !this.relPosition;
+        ImGui.sameLine();
+        if (ImGui.checkbox("Yaw", this.relYaw)) this.relYaw = !this.relYaw;
+        ImGui.sameLine();
+        if (ImGui.checkbox("Pitch", this.relPitch)) this.relPitch = !this.relPitch;
+        if (ImGui.button("Copy Relative")) {
+            copySelected(replay, this.relPosition, this.relYaw, this.relPitch);
+            ImGui.closeCurrentPopup();
+        }
+        if (ImGui.isItemHovered(imgui.flag.ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.setTooltip("Paste with Ctrl+V to repeat the move from wherever the camera is then.");
+        ImGui.separator();
+        ImGui.setNextItemWidth(120);
+        ImGui.inputFloat("Scale %", this.scalePercent, 10f, 50f, "%.0f");
+        if (ImGui.button("Scale From First Keyframe") && this.scalePercent.get() > 0) {
+            int pivot = this.selected.stream().mapToInt(Ref::tick).min().orElse(0);
+            applyScale(replay, pivot, this.scalePercent.get() / 100.0);
+            ImGui.closeCurrentPopup();
+        }
+        ImGui.endDisabled();
+    }
+
+    private void copySelected(ReplayPlayer replay, boolean relPosition, boolean relYaw, boolean relPitch) {
+        int first = this.selected.stream().mapToInt(Ref::tick).min().orElse(0);
+        this.clipboard = new ArrayList<>();
+        for (Ref ref : this.selected) {
+            Keyframe k = ref.track.keyframes.get(ref.tick);
+            if (k != null) this.clipboard.add(new Copied(ref.track.type, ref.tick - first, k.copy()));
+        }
+        var player = Minecraft.getInstance().player;
+        this.copyX = replay.camera().x();
+        this.copyY = replay.camera().y();
+        this.copyZ = replay.camera().z();
+        this.copyYaw = player.getYRot();
+        this.copyPitch = player.getXRot();
+        this.pasteRelPosition = relPosition;
+        this.pasteRelYaw = relYaw;
+        this.pasteRelPitch = relPitch;
+    }
+
+    private void paste(ReplayPlayer replay) {
+        EditorState editor = replay.editor();
+        editor.checkpoint();
+        var player = Minecraft.getInstance().player;
+        RelativeOffset offset = new RelativeOffset();
+        offset.oldX = this.copyX;
+        offset.oldY = this.copyY;
+        offset.oldZ = this.copyZ;
+        offset.newX = this.pasteRelPosition ? replay.camera().x() : this.copyX;
+        offset.newY = this.pasteRelPosition ? replay.camera().y() : this.copyY;
+        offset.newZ = this.pasteRelPosition ? replay.camera().z() : this.copyZ;
+        offset.oldYaw = this.copyYaw;
+        offset.newYaw = this.pasteRelYaw ? player.getYRot() : this.copyYaw;
+        offset.oldPitch = this.copyPitch;
+        offset.newPitch = this.pasteRelPitch ? player.getXRot() : this.copyPitch;
+        for (Copied c : this.clipboard) {
+            Keyframe k = c.keyframe.copy();
+            if (this.pasteRelPosition || this.pasteRelYaw || this.pasteRelPitch) offset.apply(c.type, k);
+            editor.scene().trackForAdding(c.type).keyframes.put(replay.tick() + c.offset, k);
+        }
+    }
+
+    private void applyScale(ReplayPlayer replay, int pivot, double factor) {
+        replay.editor().checkpoint();
+        Map<KeyframeTrack, List<Integer>> byTrack = new java.util.HashMap<>();
+        for (Ref ref : this.selected) byTrack.computeIfAbsent(ref.track, t -> new ArrayList<>()).add(ref.tick);
+        this.selected.clear();
+        byTrack.forEach((track, ticks) -> track.scale(ticks, pivot, factor).values().forEach(tick -> this.selected.add(new Ref(track, tick))));
     }
 
     private void mark(ReplayPlayer replay, boolean in) {
@@ -229,7 +325,9 @@ public final class TimelinePanel {
         int rowIndex = 0;
         boolean clickedKey = false;
         KeyframeTrack deleteTrack = null;
+        List<Row> rows = new ArrayList<>();
         for (KeyframeTrack track : tracks) {
+            rows.add(new Row(track, rowY));
             draw.addRectFilled(originX, rowY, areaX + areaW, rowY + ROW_HEIGHT, rowIndex % 2 == 0 ? 0xFF201C1A : 0xFF1A1716);
             ImGui.setCursorScreenPos(originX + 2, rowY + 1);
             ImGui.pushID(rowIndex);
@@ -249,6 +347,13 @@ public final class TimelinePanel {
                     track.keyframes.clear();
                 }
                 if (ImGui.menuItem("Delete Track")) deleteTrack = track;
+                ImGui.separator();
+                int rgb = track.color != null ? track.color : track.type.color;
+                float[] color = {((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f};
+                if (ImGui.colorEdit3("Track Color", color, imgui.flag.ImGuiColorEditFlags.NoInputs)) {
+                    track.color = (Math.round(color[0] * 255) << 16) | (Math.round(color[1] * 255) << 8) | Math.round(color[2] * 255);
+                }
+                if (track.color != null && ImGui.menuItem("Reset Color")) track.color = null;
                 ImGui.endPopup();
             }
             ImGui.popStyleVar();
@@ -262,7 +367,7 @@ public final class TimelinePanel {
                 int tick = entry.getKey() + (isSelected && this.draggingKeys ? this.dragDelta : 0);
                 float kx = tickX(tick, areaX);
                 if (kx < areaX - DIAMOND || kx > areaX + areaW + DIAMOND) continue;
-                int base = rgbToAbgr(track.type.color);
+                int base = rgbToAbgr(track.color != null ? 0xFF000000 | track.color : track.type.color);
                 int color = track.enabled ? base : 0xFF666666;
                 draw.addQuadFilled(kx, midY - DIAMOND, kx + DIAMOND, midY, kx, midY + DIAMOND, kx - DIAMOND, midY, color);
                 if (isSelected) draw.addQuad(kx, midY - DIAMOND - 1, kx + DIAMOND + 1, midY, kx, midY + DIAMOND + 1, kx - DIAMOND - 1, midY, 0xFFFFFFFF, 1.5f);
@@ -306,7 +411,60 @@ public final class TimelinePanel {
                 this.dragDelta = 0;
             }
         }
-        if (overArea && !overRuler && !clickedKey && ImGui.isMouseClicked(ImGuiMouseButton.Left)) this.selected.clear();
+        // Handles at the ends of a selection stretch it in time.
+        if (this.selected.size() >= 2 && !this.draggingKeys) {
+            int low = this.selected.stream().mapToInt(Ref::tick).min().orElse(0);
+            int high = this.selected.stream().mapToInt(Ref::tick).max().orElse(0);
+            if (high > low) {
+                float top = originY + RULER_HEIGHT;
+                float bottom = rowY;
+                float lx = tickX(low, areaX) - DIAMOND - 5;
+                float hx = tickX(high, areaX) + DIAMOND + 5;
+                draw.addRectFilled(lx - 2, top, lx + 2, bottom, 0xFFFFFFFF);
+                draw.addRectFilled(hx - 2, top, hx + 2, bottom, 0xFFFFFFFF);
+                boolean overLow = ImGui.isMouseHoveringRect(lx - 4, top, lx + 4, bottom);
+                boolean overHigh = ImGui.isMouseHoveringRect(hx - 4, top, hx + 4, bottom);
+                if ((overLow || overHigh) && ImGui.isMouseClicked(ImGuiMouseButton.Left)) {
+                    clickedKey = true;
+                    this.scaling = true;
+                    this.scalePivot = overLow ? high : low;
+                    this.scaleGrabbed = overLow ? low : high;
+                }
+            }
+        }
+        if (this.scaling) {
+            int at = xTick(ImGui.getMousePosX(), areaX);
+            double factor = Math.max(0.01, (at - this.scalePivot) / (double) (this.scaleGrabbed - this.scalePivot));
+            ImGui.setTooltip(Math.round(factor * 100) + "%");
+            if (!ImGui.isMouseDown(ImGuiMouseButton.Left)) {
+                this.scaling = false;
+                if (Math.abs(factor - 1) > 1e-3) applyScale(replay, this.scalePivot, factor);
+            }
+        }
+
+        // Dragging across empty space selects everything inside the box.
+        if (overArea && !overRuler && !clickedKey && !this.scaling && ImGui.isMouseClicked(ImGuiMouseButton.Left)) {
+            if (!ImGui.getIO().getKeyCtrl()) this.selected.clear();
+            this.boxing = true;
+            this.boxX = ImGui.getMousePosX();
+            this.boxY = ImGui.getMousePosY();
+        }
+        if (this.boxing) {
+            float bx0 = Math.min(this.boxX, ImGui.getMousePosX()), bx1 = Math.max(this.boxX, ImGui.getMousePosX());
+            float by0 = Math.min(this.boxY, ImGui.getMousePosY()), by1 = Math.max(this.boxY, ImGui.getMousePosY());
+            draw.addRectFilled(bx0, by0, bx1, by1, 0x30FFFFFF);
+            draw.addRect(bx0, by0, bx1, by1, 0xC0FFFFFF);
+            if (!ImGui.isMouseDown(ImGuiMouseButton.Left)) {
+                this.boxing = false;
+                for (Row row : rows) {
+                    if (row.y + ROW_HEIGHT < by0 || row.y > by1) continue;
+                    for (Integer tick : row.track.keyframes.keySet()) {
+                        float kx = tickX(tick, areaX);
+                        if (kx >= bx0 && kx <= bx1) this.selected.add(new Ref(row.track, tick));
+                    }
+                }
+            }
+        }
 
         // Playhead
         float px = tickX(replay.tick(), areaX);
@@ -359,20 +517,8 @@ public final class TimelinePanel {
             for (Ref ref : this.selected) ref.track.keyframes.remove(ref.tick);
             this.selected.clear();
         }
-        if (ctrl && ImGui.isKeyPressed(ImGuiKey.C, false) && !this.selected.isEmpty()) {
-            int first = this.selected.stream().mapToInt(Ref::tick).min().orElse(0);
-            this.clipboard = new ArrayList<>();
-            for (Ref ref : this.selected) {
-                Keyframe k = ref.track.keyframes.get(ref.tick);
-                if (k != null) this.clipboard.add(new Copied(ref.track.type, ref.tick - first, k.copy()));
-            }
-        }
-        if (ctrl && ImGui.isKeyPressed(ImGuiKey.V, false) && !this.clipboard.isEmpty()) {
-            editor.checkpoint();
-            for (Copied c : this.clipboard) {
-                editor.scene().trackForAdding(c.type).keyframes.put(replay.tick() + c.offset, c.keyframe.copy());
-            }
-        }
+        if (ctrl && ImGui.isKeyPressed(ImGuiKey.C, false) && !this.selected.isEmpty()) copySelected(replay, false, false, false);
+        if (ctrl && ImGui.isKeyPressed(ImGuiKey.V, false) && !this.clipboard.isEmpty()) paste(replay);
     }
 
     private void drawKeyframeEditor(ReplayPlayer replay) {

@@ -35,6 +35,7 @@ public final class ExportDialog {
     private ExportSettings.Format format = ExportSettings.Format.MP4_H264;
     private final ImBoolean audio = new ImBoolean(true);
     private final ImBoolean transparent = new ImBoolean(false);
+    private final ImBoolean resetRng = new ImBoolean(true);
 
     public static ExportDialog get() {
         return INSTANCE;
@@ -90,6 +91,8 @@ public final class ExportDialog {
                     ImGui.textColored(1f, 0.5f, 0.3f, 1f, "FFmpeg was not found. Install it on your PATH, or copy ffmpeg into the flashforge folder.");
                 }
             }
+            ImGui.checkbox("Reset randomness", this.resetRng);
+            if (ImGui.isItemHovered()) ImGui.setTooltip("Particles and ambient effects come out the same on every export, so a re-export only differs where you changed something.");
             ImGui.sliderInt("Warm-up frames", this.warmup.getData(), 0, 240);
             if (ImGui.isItemHovered()) ImGui.setTooltip("Frames rendered but not saved before the export begins, so temporal shaders can settle.");
             ImGui.separator();
@@ -137,6 +140,7 @@ public final class ExportDialog {
         s.height = evenSize(this.height.get());
         s.supersample = Math.max(1, this.supersample.get());
         s.warmupFrames = this.warmup.get();
+        s.resetRng = this.resetRng.get();
         s.screenshot = this.mode == Mode.SCREENSHOT;
         Path exports = ReplayStorage.exports();
         if (s.screenshot) {

@@ -118,7 +118,7 @@ public final class SidePanels {
                 int[] time = {v.time};
                 if (ImGui.sliderInt("Time", time, 0, 24000)) v.time = time[0];
             }
-            String[] weather = {"As Recorded", "Clear", "Rain", "Thunder"};
+            String[] weather = {"As Recorded", "Clear", "Rain", "Thunder", "Overcast", "Snow"};
             if (ImGui.beginCombo("Weather", weather[v.weather])) {
                 for (int i = 0; i < weather.length; i++) {
                     if (ImGui.selectable(weather[i], i == v.weather)) v.weather = i;
@@ -138,6 +138,29 @@ public final class SidePanels {
             if (v.overrideFogColor) ImGui.colorEdit3("Fog Color", v.fogColor);
             v.overrideSkyColor = toggle("Solid Sky Color", v.overrideSkyColor);
             if (v.overrideSkyColor) ImGui.colorEdit3("Sky Color", v.skyColor);
+        }
+        if (ImGui.collapsingHeader("Game View")) {
+            String[] sizes = {"Keep Window Shape", "Change Shape", "Fill Space", "Behind Panels"};
+            if (ImGui.beginCombo("Sizing", sizes[v.sizing])) {
+                for (int i = 0; i < sizes.length; i++) {
+                    if (ImGui.selectable(sizes[i], i == v.sizing)) v.sizing = i;
+                }
+                ImGui.endCombo();
+            }
+            if (v.sizing == 1) {
+                String[] shapes = {"16:9", "9:16", "2.4:1", "1:1", "4:3", "3:2"};
+                float[] ratios = {16f / 9f, 9f / 16f, 2.4f, 1f, 4f / 3f, 3f / 2f};
+                int chosen = 0;
+                for (int i = 0; i < ratios.length; i++) {
+                    if (Math.abs(ratios[i] - v.viewAspect) < 1e-3) chosen = i;
+                }
+                if (ImGui.beginCombo("Shape", shapes[chosen])) {
+                    for (int i = 0; i < shapes.length; i++) {
+                        if (ImGui.selectable(shapes[i], i == chosen)) v.viewAspect = ratios[i];
+                    }
+                    ImGui.endCombo();
+                }
+            }
         }
         if (ImGui.collapsingHeader("Guides")) {
             v.ruleOfThirds = toggle("Rule of Thirds", v.ruleOfThirds);
@@ -236,15 +259,7 @@ public final class SidePanels {
                 if (++shown > 60) break;
                 ImGui.pushID(e.getId());
                 if (ImGui.treeNode(label + " (" + Math.round(Math.sqrt(e.distanceToSqr(camera))) + " m)")) {
-                    String id = e.getUUID().toString();
-                    if (ImGui.smallButton("Spectate")) replay.spectate(e);
-                    ImGui.sameLine();
-                    if (ImGui.smallButton("TP")) replay.camera().teleport(e.getX(), e.getY() + 1.6, e.getZ() - 3, 0, 15);
-                    if (ImGui.checkbox("Glow", v.glowingEntities.contains(id))) toggle(v.glowingEntities, id);
-                    if (ImGui.checkbox("Never Glow", v.noGlowEntities.contains(id))) toggle(v.noGlowEntities, id);
-                    if (ImGui.checkbox("Hide Name Tag", v.hiddenNametags.contains(id))) toggle(v.hiddenNametags, id);
-                    if (ImGui.checkbox("Mute", v.mutedEntities.contains(id))) toggle(v.mutedEntities, id);
-                    if (ImGui.smallButton("Copy UUID")) ImGui.setClipboardText(id);
+                    EntityPopup.controls(replay, e);
                     ImGui.treePop();
                 }
                 ImGui.popID();

@@ -39,5 +39,11 @@
   "key.flashforge.add_marker_3": "Add Marker (Blue)",
   "key.flashforge.add_marker_4": "Add Marker (Yellow)",
   "flashforge.pause.cancel": "Cancel Recording",
-  "flashforge.pause.cancel_confirm": "Throw this recording away?"
+  "flashforge.pause.cancel_confirm": "Throw this recording away?",
+  "flashforge.browser.sort": "Sort: %s",
+  "flashforge.browser.sort.date": "Date",
+  "flashforge.browser.sort.name": "Name",
+  "flashforge.browser.sort.world": "World",
+  "flashforge.browser.sort.duration": "Length",
+  "flashforge.browser.sort.size": "Size"
 }

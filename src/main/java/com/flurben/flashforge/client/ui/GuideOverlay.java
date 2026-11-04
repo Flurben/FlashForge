@@ -16,7 +16,9 @@ final class GuideOverlay {
     static void draw(ReplayPlayer replay, int viewX, int viewY, int viewW, int viewH, Window window) {
         Visuals v = replay.editor().visuals();
         if (!v.ruleOfThirds && !v.centerGuide && v.aspectGuide <= 0) return;
-        float toUi = (float) window.getScreenWidth() / Math.max(1, window.getWidth());
+        int[] fbW = new int[1], fbH = new int[1];
+        org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window.getWindow(), fbW, fbH);
+        float toUi = (float) window.getScreenWidth() / Math.max(1, fbW[0]);
         float x = viewX * toUi;
         float w = viewW * toUi;
         float h = viewH * toUi;

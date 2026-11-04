@@ -227,6 +227,9 @@ public final class Recorder {
         this.tick++;
         this.meta.totalTicks = this.tick;
 
+        // A few seconds in, once the world has loaded around the player.
+        if (this.tick == THUMBNAIL_TICK) saveThumbnail();
+
         if (this.segment.ticks >= SEGMENT_TICKS) {
             rollSegment();
         }
@@ -235,6 +238,9 @@ public final class Recorder {
             saveMeta();
         }
     }
+
+    private static final int THUMBNAIL_TICK = 100;
+    private boolean thumbnailSaved;
 
     private void rollSegment() {
         synchronized (this.lock) {
@@ -327,7 +333,18 @@ public final class Recorder {
         }
     }
 
+    private void saveThumbnail() {
+        this.thumbnailSaved = true;
+        try {
+            Thumbnails.save(net.minecraft.client.Screenshot.takeScreenshot(Minecraft.getInstance().getMainRenderTarget()), this.dir);
+        } catch (Throwable t) {
+            // A missing picture is no reason to disturb a recording.
+            FlashForge.LOGGER.warn("Could not save replay thumbnail", t);
+        }
+    }
+
     public Path stop() {
+        if (!this.thumbnailSaved) saveThumbnail();
         active = null;
         this.meta.finished = true;
         synchronized (this.lock) {

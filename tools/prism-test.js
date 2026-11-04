@@ -45,6 +45,10 @@ function prismRunning() {
 }
 
 async function main() {
+  // The dev test doesn't produce this jar, so testing without building can silently test old code.
+  const built = spawnSync(`"${path.join(ROOT, "gradlew.bat")}" build --no-daemon -q`, { cwd: ROOT, shell: true, stdio: "inherit", env: { ...process.env, JAVA_HOME: "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.20.101-hotspot" } });
+  if (built.status !== 0) throw new Error("Build failed");
+
   const version = fs.readFileSync(path.join(ROOT, "gradle.properties"), "utf8").match(/mod_version\s*=\s*(\S+)/)[1];
   const mods = path.join(game, "mods");
   for (const f of fs.readdirSync(mods)) if (f.startsWith("flashforge-")) fs.rmSync(path.join(mods, f));

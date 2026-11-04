@@ -10,6 +10,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Vector3f;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
@@ -45,7 +47,81 @@ public final class VisualsRuntime {
 
     public static boolean hideWeather() {
         Visuals v = visuals();
-        return v != null && !v.renderWeather;
+        return v != null && (!v.renderWeather || v.weather == 4);
+    }
+
+    /** Null keeps each biome's own rain or snow. */
+    public static net.minecraft.world.level.biome.Biome.Precipitation forcedPrecipitation() {
+        Visuals v = visuals();
+        if (v == null) return null;
+        return switch (v.weather) {
+            case 2, 3 -> net.minecraft.world.level.biome.Biome.Precipitation.RAIN;
+            case 5 -> net.minecraft.world.level.biome.Biome.Precipitation.SNOW;
+            default -> null;
+        };
+    }
+
+    /** Null keeps the recorded weather. */
+    public static Float forcedRainLevel() {
+        Visuals v = visuals();
+        return v == null || v.weather == 0 ? null : v.weather == 1 ? Float.valueOf(0f) : Float.valueOf(1f);
+    }
+
+    public static Float forcedThunderLevel() {
+        Visuals v = visuals();
+        return v == null || v.weather == 0 ? null : v.weather == 3 ? Float.valueOf(1f) : Float.valueOf(0f);
+    }
+
+    private static volatile Vec3 audioPosition;
+    private static volatile Vector3f audioLook;
+    private static volatile Vector3f audioUp;
+    private static volatile Vec3 lastListener;
+
+    /** Runs each frame. The results are read on the sound thread. */
+    public static void updateAudioSource() {
+        Visuals v = visuals();
+        Minecraft mc = Minecraft.getInstance();
+        Entity source = null;
+        if (v != null && v.audioSource != null && mc.level != null) {
+            for (Entity e : mc.level.entitiesForRendering()) {
+                if (e.getUUID().toString().equals(v.audioSource)) {
+                    source = e;
+                    break;
+                }
+            }
+        }
+        if (source == null) {
+            audioPosition = null;
+            return;
+        }
+        float partial = mc.getFrameTime();
+        Vec3 view = source.getViewVector(partial);
+        Vec3 side = view.cross(new Vec3(0, 1, 0));
+        // Looking straight up or down leaves no side vector to build "up" from.
+        Vec3 up = side.lengthSqr() < 1e-6 ? new Vec3(0, 0, 1) : side.cross(view).normalize();
+        audioLook = new Vector3f((float) view.x, (float) view.y, (float) view.z);
+        audioUp = new Vector3f((float) up.x, (float) up.y, (float) up.z);
+        audioPosition = source.getEyePosition(partial);
+    }
+
+    public static Vec3 listenerPosition(Vec3 camera) {
+        Vec3 source = audioPosition;
+        Vec3 out = source != null ? source : camera;
+        lastListener = out;
+        return out;
+    }
+
+    public static Vector3f listenerLook(Vector3f camera) {
+        return audioPosition != null ? audioLook : camera;
+    }
+
+    public static Vector3f listenerUp(Vector3f camera) {
+        return audioPosition != null ? audioUp : camera;
+    }
+
+    /** Where sounds were last heard from. */
+    public static Vec3 lastListener() {
+        return lastListener;
     }
 
     public static boolean hideWorldBorder() {
@@ -77,6 +153,7 @@ public final class VisualsRuntime {
         Visuals v = visuals();
         if (v == null) return false;
         if (entity instanceof LocalPlayer) return false;
+        if (ExportManager.isExporting() && v.hiddenEntities.contains(entity.getUUID().toString())) return true;
         if (entity instanceof Player player) {
             if (!v.renderPlayers || v.hiddenPlayers.contains(player.getUUID().toString()) || (v.hideSpectators && player.isSpectator())) return true;
         } else if (!v.renderEntities) {

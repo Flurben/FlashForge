@@ -137,6 +137,17 @@ public final class ExportManager {
         if (job != null) job.frameRendered();
     }
 
+    private static java.util.Random rng;
+
+    /** True during an export that wants the same result every time. */
+    public static boolean rngActive() {
+        return job != null && job.settings.resetRng && rng != null;
+    }
+
+    public static long nextSeed() {
+        return rng.nextLong();
+    }
+
     /** Size the game should render at during an export, or null for the window's real size. */
     public static int[] renderSize() {
         return job == null ? null : new int[]{job.renderWidth, job.renderHeight};
@@ -219,6 +230,9 @@ public final class ExportManager {
             }
             this.capturedThisFrame = false;
             this.clockFrames++;
+            rng = this.settings.resetRng ? new java.util.Random(0x5DEECE66DL ^ (long) Math.floor(this.position) * 0x9E3779B97F4A7C15L) : null;
+            // Falling rain and snow are drawn from this counter, which otherwise depends on how long the game has been open.
+            if (this.settings.resetRng) ((com.flurben.flashforge.mixin.accessor.LevelRendererAccessor) this.mc.levelRenderer).flashforge$setTicks((int) Math.floor(this.position));
 
             if (!this.sized) {
                 this.sized = true;

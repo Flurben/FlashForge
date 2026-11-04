@@ -8,6 +8,8 @@ public final class KeyframeTrack {
     public TrackType type;
     public String name;
     public boolean enabled = true;
+    /** RGB chosen for this track, or null for its type's color. */
+    public Integer color;
     public TreeMap<Integer, Keyframe> keyframes = new TreeMap<>();
 
     public KeyframeTrack() {}
@@ -67,10 +69,30 @@ public final class KeyframeTrack {
         return reference + delta;
     }
 
+    /**
+     * Stretches or squeezes these keyframes in time around a fixed tick, which changes how fast a move plays.
+     * @return where each one ended up, by its old tick
+     */
+    public java.util.Map<Integer, Integer> scale(java.util.Collection<Integer> ticks, int pivot, double factor) {
+        java.util.Map<Integer, Keyframe> picked = new TreeMap<>();
+        for (int tick : ticks) {
+            Keyframe k = this.keyframes.remove(tick);
+            if (k != null) picked.put(tick, k);
+        }
+        java.util.Map<Integer, Integer> moved = new TreeMap<>();
+        picked.forEach((tick, k) -> {
+            int target = Math.max(0, pivot + (int) Math.round((tick - pivot) * factor));
+            this.keyframes.put(target, k);
+            moved.put(tick, target);
+        });
+        return moved;
+    }
+
     public KeyframeTrack copy() {
         KeyframeTrack t = new KeyframeTrack(this.type);
         t.name = this.name;
         t.enabled = this.enabled;
+        t.color = this.color;
         this.keyframes.forEach((tick, k) -> t.keyframes.put(tick, k.copy()));
         return t;
     }

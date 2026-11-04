@@ -35,6 +35,9 @@ public final class ReplayCombiner {
         Files.copy(first.resolve("registries.nbt"), dir.resolve("registries.nbt"));
         if (Files.exists(first.resolve("serverconfig.nbt"))) Files.copy(first.resolve("serverconfig.nbt"), dir.resolve("serverconfig.nbt"));
 
+        Path icon = first.resolve(com.flurben.flashforge.record.Thumbnails.FILE);
+        if (Files.exists(icon)) Files.copy(icon, dir.resolve(com.flurben.flashforge.record.Thumbnails.FILE));
+
         int index = append(first, a, dir, out, 0);
         append(second, b, dir, out, index);
         out.finished = true;

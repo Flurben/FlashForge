@@ -33,6 +33,7 @@ final class MenuBar {
         }
         if (ImGui.beginMenu("View")) {
             if (ImGui.menuItem("Hide Editor", "F1")) this.ui.toggleHidden();
+            if (ImGui.menuItem("Show Tip")) this.ui.tips().show();
             ImGui.endMenu();
         }
         ImGui.separator();

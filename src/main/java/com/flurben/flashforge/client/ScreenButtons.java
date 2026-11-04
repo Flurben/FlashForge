@@ -103,6 +103,46 @@ public final class ScreenButtons {
         g.drawString(mc.font, String.format("%d:%02d", seconds / 60, seconds % 60), 14, 4, 0xFFFFFF);
     }
 
+    /** Marks what the editor treats specially: yellow is selected, green is the audio source, red is left out of exports. */
+    @SubscribeEvent
+    public static void entityOutlines(RenderLevelStageEvent event) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
+        ReplayPlayer replay = ReplayPlayer.active();
+        if (replay == null || ExportManager.isExporting() || EditorUi.get().hidden()) return;
+        com.flurben.flashforge.editor.Visuals v = replay.editor().visuals();
+        java.util.UUID selected = EditorUi.get().entityPopup().selected();
+        if (selected == null && v.audioSource == null && v.hiddenEntities.isEmpty()) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        Vec3 eye = event.getCamera().getPosition();
+        PoseStack pose = event.getPoseStack();
+        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+            String id = entity.getUUID().toString();
+            float r, g, b;
+            if (entity.getUUID().equals(selected)) {
+                r = 1f;
+                g = 1f;
+                b = 0.2f;
+            } else if (id.equals(v.audioSource)) {
+                r = 0.2f;
+                g = 1f;
+                b = 0.2f;
+            } else if (v.hiddenEntities.contains(id)) {
+                r = 1f;
+                g = 0.2f;
+                b = 0.2f;
+            } else {
+                continue;
+            }
+            float partial = event.getPartialTick();
+            Vec3 at = entity.getPosition(partial).subtract(entity.position()).subtract(eye);
+            net.minecraft.client.renderer.LevelRenderer.renderLineBox(pose, lines, entity.getBoundingBox().move(at), r, g, b, 1f);
+        }
+        buffers.endBatch(RenderType.lines());
+    }
+
     /** Shows where the camera will travel. Editor only, so it can't appear in an export. */
     @SubscribeEvent
     public static void cameraPath(RenderLevelStageEvent event) {

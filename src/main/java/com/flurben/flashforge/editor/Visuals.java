@@ -36,7 +36,7 @@ public final class Visuals {
     public float fov = 70f;
     public boolean overrideTime = false;
     public int time = 6000;
-    /** 0 = off, 1 = clear, 2 = rain, 3 = thunder. */
+    /** 0 = off, 1 = clear, 2 = rain, 3 = thunder, 4 = overcast, 5 = snow. */
     public int weather = 0;
     public boolean fullBright = false;
     public boolean disableFog = false;
@@ -56,6 +56,15 @@ public final class Visuals {
     public boolean showCameraPath = true;
     /** 0 = off, otherwise width / height. */
     public float aspectGuide = 0f;
+
+    // How the game image uses the space between the panels: 0 = keep window shape, 1 = chosen shape, 2 = fill, 3 = behind the panels.
+    public int sizing = 0;
+    public float viewAspect = 16f / 9f;
+
+    /** Whose position sounds are heard from, instead of the camera's. */
+    public String audioSource;
+    /** Entity UUIDs left out of exports. They stay visible in the editor, outlined in red. */
+    public Set<String> hiddenEntities = new HashSet<>();
 
     // Entity filters: hidden player UUIDs, hidden entity types (by registry id), per-entity tweaks.
     public Set<String> hiddenPlayers = new HashSet<>();

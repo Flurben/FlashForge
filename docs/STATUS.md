@@ -37,19 +37,27 @@ handler when a player has no cape. FlashForge skips it and logs it. Whether it a
 | PNG export at higher resolution | Verified |
 | Editor UI scale (`editorScale` in the client config) | Verified at 1.5; scales text only, panel sizes stay fixed |
 | Simple Voice Chat recording and playback | Implemented; **not verified end to end** |
+| Weather overrides: clear, rain, thunder, overcast, snow | Overcast and snow verified, including in TFC under shaders |
+| Audio source entity | Verified: sounds are heard from the chosen entity. Listening to the result wasn't checked |
+| `/hide` and `/show` | Verified by running the commands; hidden entities are outlined in red and left out of exports. Opening chat with the keyboard in a replay wasn't exercised |
+| Entity popup | Finding the entity at a point and the popup itself verified; the real right-click wasn't exercised |
+| Replay thumbnails | Verified |
+| Replay sorting (date, name, world, length, size) | Button shown; changing the sort wasn't exercised |
+| Tips | Verified on request; showing automatically on open wasn't exercised |
+| Game view sizing: change shape, fill, behind panels | Change shape at 1:1 and behind panels verified; fill and other shapes not exercised |
+| Keyframe relative copy | The math is verified against worked examples; the menu and paste weren't exercised |
+| Keyframe scaling | The math is verified; the drag handles and menu weren't exercised |
+| Drag-select keyframes and per-track colors | Implemented, not exercised |
+| Reset randomness on export | Repeat exports match closely, but not exactly (see below) |
+
+Repeat exports of the same range with the same settings are not byte-identical. They differ by a few particle pixels: about
+55 dB PSNR in TFG and 38 to 40 dB in the dev client's rainy world.
 
 ## Known gaps compared to Flashback
 
-- Snow and overcast weather overrides
-- Choosing which entity audio is heard from
-- `/hide` command
-- Right-click entity popup in the viewport
-- Upload link, tips, replay thumbnails, replay sorting
-- Keyframe relative copy, scale, and per-track colors
-- Reset-RNG setting (the field exists but does nothing)
-- Bobby chunk support
-- Changing aspect ratio (only a guide overlay)
-- Modded login-phase payloads are not replayed
+- **Upload to medal.tv and copy a link.** Flashback sends clips to a medal.tv address made for Flashback and identifies itself as Flashback. FlashForge doesn't pretend to be another mod to use it.
+- **Bobby chunk support.** Modrinth lists Bobby for 1.20.1 on Fabric only, so there is no Forge version to integrate with or test.
+- Modded login-phase payloads are not replayed.
 
 ## Differences from what was asked
 
@@ -67,11 +75,13 @@ handler when a player has no cape. FlashForge skips it and logs it. Whether it a
 - Mod payloads that refer to a player failed when applied before the world in a snapshot; failures are now retried at the end of the snapshot.
 - Packets queued at the moment recording began were lost, which is more likely with large registries. These are now applied before the first snapshot.
 - Shader exports came out black because the shader clock jumped backward when an export began. The clock is now continuous.
+- TFC decides rain and snow itself, which overrode FlashForge's weather settings. The overrides now run first, and only while one is set.
+- The first frames of an export could zoom slightly, as a FOV value frozen during pause caught up. The viewer's FOV modifier is now fixed.
 
 ## Not tested
 
 - Multiplayer servers: all recordings came from singleplayer worlds.
 - Long recordings: the longest was 1200 ticks, a single segment.
-- TFC weather: the test's `weather rain` command showed no rain in a TFC world, and it wasn't checked whether TFC overrides it. Rain itself replays correctly in the dev client.
+- Recorded rain in a TFC world: TFC's weather ignores the test's `weather rain` command, so no recorded TFC rain has been replayed. Recorded rain replays correctly in the dev client.
 - Other GPUs and operating systems.
 - TFG's own shader pack `TerraFirmaGreg-Shaders-Complementary-3.1.6.zip`.
